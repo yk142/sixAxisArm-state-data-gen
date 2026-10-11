@@ -54,8 +54,10 @@ classdef test_sa_plant < matlab.unittest.TestCase
         function interface(tc, nAx)
             m = tc.mdl(nAx);
             tc.verifyEqual(numel(find_system(m,'MaskType','Revolute Joint')), nAx);
-            tc.verifyEqual(get_param(m,'Solver'), 'ode14x');
-            tc.verifyEqual(str2double(get_param(m,'FixedStep')), 1/8000, 'AbsTol', 1e-15);
+            tc.verifyEqual(get_param(m,'Solver'), 'ode15s');
+            tc.verifyEqual(str2double(get_param(m,'MaxStep')), 1/8000, 'AbsTol', 1e-15);
+            scb = find_system(m,'MaskType','Solver Configuration');
+            tc.verifyEqual(str2double(get_param(scb{1},'FilteringTimeConstant')), 1e-5, 'RelTol', 1e-9);
             o = simSa(m, [0;0.01], zeros(1,nAx), zeros(nAx,1));
             tc.verifyEqual(size(o.q,2), nAx);
             tc.verifyEqual(size(o.dq,2), nAx);
@@ -83,7 +85,20 @@ classdef test_sa_plant < matlab.unittest.TestCase
                 e = saCompareFwdDyn(tc.mdl(nAx), tc.p, q0, dq0, tau, 0.2, 8000, 0.01);
                 tc.verifyLessThan(max(e.dqW), 0.01);                  % rad/s
                 tc.verifyLessThan(max(rad2deg(e.qW)), 0.1);           % deg
+                tc.verifyLessThan(max(e.dq), 0.01);                   % t=0 から積分した参照とも一致（初期過渡なし）
             end
+        end
+
+        function matchesForwardDynamicsUnderTorqueChanges(tc, nAx)
+            % トルクが 1 ステップ(0.125 ms)ごとに変わる乱数列（各軸 ±20% 定格）でも解析モデルと一致する
+            % （RMI の自動フィルタによる約 1 ms の遅れがないこと。docs/phase1_report.md）。
+            % 格子上の標本値を線形補間(FOH)で与え、参照も同じ補間で積分する
+            rs = RandStream('mt19937ar','Seed',3);
+            q0 = tc.randPose(nAx, rs);
+            seq = tc.gravTorque(q0)' + 0.2*tc.p.tauRated(1:nAx).*(2*rand(rs,40,nAx) - 1);
+            e = saComparePwc(tc.mdl(nAx), tc.p, q0, seq, 8000, 1, true);
+            tc.verifyLessThan(max(e.dqRms), 2e-3);        % rad/s
+            tc.verifyLessThan(max(e.dq), 5e-3);           % rad/s
         end
 
         function freeFallReachesJ2Limit(tc, nAx)
