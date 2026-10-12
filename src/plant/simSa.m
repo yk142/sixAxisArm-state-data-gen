@@ -5,6 +5,7 @@ function out = simSa(mdl, tVec, tau, q0, dq0, onGrid)
 %     onGrid (既定 true): true なら (tVec, tau) をそのまま入力テーブルにする（ソルバ格子上の標本値。
 %       入力は格子点の間で線形補間される）。false は区間ごとの厳密なゼロ次保持（ステップの立ち上がりが
 %       eps 幅になり、Solver Configuration の FilteringTimeConstant を小さくすると失敗しうる）。
+%   出力は tVec の格子（SpecifiedOutputTimes）。
 %   out: .t [M x 1], .q [M x nAx], .dq [M x nAx]、3 番目の Outport があれば .tau（励振モデルの飽和後の実印加トルク）。
 tVec = tVec(:);  q0 = q0(:);  nAx = numel(q0);
 if nargin < 5 || isempty(dq0), dq0 = zeros(nAx,1); end
@@ -24,8 +25,10 @@ else
     tt = [tt; tVec(end)];  uu = [uu; tau(end,:)];
 end
 assignin('base','SA_tau_in',[tt uu]);
-o = sim(mdl, 'StopTime', num2str(tVec(end),'%.12g'), 'LoadExternalInput','on', ...
-    'ExternalInput','SA_tau_in', 'SaveOutput','on', 'SaveFormat','Dataset');
+assignin('base','SA_out_t',tVec);
+o = sim(mdl, 'StopTime', sprintf('%.17g',tVec(end)), 'LoadExternalInput','on', ...
+    'ExternalInput','SA_tau_in', 'SaveOutput','on', 'SaveFormat','Dataset', ...
+    'OutputOption','SpecifiedOutputTimes', 'OutputTimes','SA_out_t');   % 出力は tVec の格子（docs/phase2_0_report.md）
 out.t  = o.yout.getElement(1).Values.Time;
 out.q  = o.yout.getElement(1).Values.Data;
 out.dq = o.yout.getElement(2).Values.Data;
