@@ -110,6 +110,26 @@ classdef test_sa_pipeline < matlab.unittest.TestCase
             tc.verifyEqual(find(sc.atLimit)', [4 5]);        % q(5) がリミット上 → 遷移 4（終了側）と 5（開始側）
         end
 
+        function repoStateAndProvenance(tc)
+            r = saRepoState();
+            tc.verifyEqual(numel(r.commit), 40);  tc.verifyClass(r.dirty, 'logical');
+            if r.dirty, tc.verifyEqual(numel(r.diffHash), 16); else, tc.verifyEmpty(r.diffHash); end
+            clean = struct('commit',repmat('a',1,40),'dirty',false,'diffHash','');
+            dirty = struct('commit',repmat('a',1,40),'dirty',true,'diffHash','0123456789abcdef');
+            % 全件がクリーンかつ同一コミット → genClean
+            ds = tc.assemble(@(e, s) setfield(setfield(e,'repo',clean),'matlab','R-test')); %#ok<SFLD>
+            tc.verifyTrue(ds.manifest.genClean);  tc.verifyEqual(numel(ds.manifest.genRepo), 1);
+            tc.verifyEqual(ds.manifest.genMatlab, {'R-test'});
+            % 1 本でも dirty → genClean = false、来歴は 2 種類並ぶ
+            ds = tc.assemble(@(e, s) setfield(e,'repo',ternary(strcmp(s.name,'hold_p1_001'), dirty, clean))); %#ok<SFLD>
+            tc.verifyFalse(ds.manifest.genClean);  tc.verifyEqual(numel(ds.manifest.genRepo), 2);
+            % 来歴の無いキャッシュ → genClean = false
+            tc.verifyFalse(tc.assemble().manifest.genClean);
+            % 生成時間の合計
+            ds = tc.assemble(@(e, s) setfield(e,'wall',2));  %#ok<SFLD>
+            tc.verifyEqual(ds.manifest.wallTotal, 2*numel(tc.S));
+        end
+
         function validatePassesAndDetectsFaults(tc)
             ds = tc.assemble();
             r = validateSaData(ds, struct('nSample',30,'verbose',false));
