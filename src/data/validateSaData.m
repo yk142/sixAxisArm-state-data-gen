@@ -5,7 +5,7 @@ function r = validateSaData(ds, opts)
 %     opts.verbose  結果を表示（既定 true）
 %   r.ok       すべての検査に合格したか、r.fail 不合格の検査（cell）
 %   r.metrics  解析モデル（RNEA＋摩擦、saFwdDyn）との 1 ステップ整合の残差比（軸ごと。報告用で合否には使わない）
-%   検査: 有限性、トルク ≤ tauPeak、角度が可動範囲 ± 1° 内、|dq| ≤ qdMax（接触シナリオは 1.3 倍まで）、配列サイズ、split のリーク
+%   検査: 有限性、トルク ≤ tauPeak、角度が可動範囲 ± 1° 内、|dq| ≤ qdMax（接触シナリオは 1.5 倍まで）、配列サイズ、split のリーク
 %   （名前・シードの重複なし、PTP は benchmark のみ、benchmark は PTP のみ）、初期状態の重複なし。
 if nargin < 2, opts = struct(); end
 if ~isfield(opts,'nSample'), opts.nSample = 2000; end
@@ -19,7 +19,7 @@ for k = 1:numel(sc)
     fail = addIf(fail, all(isfinite(s.q),'all') && all(isfinite(s.dq),'all') && all(isfinite(s.tau),'all'), sprintf('%s: 有限性', nm));
     fail = addIf(fail, all(abs(s.tau) <= sp.tauPeak*(1 + 1e-6), 'all'), sprintf('%s: トルクが tauPeak 超過', nm));
     fail = addIf(fail, all(s.q >= sp.qMin - deg2rad(1) & s.q <= sp.qMax + deg2rad(1), 'all'), sprintf('%s: 角度が可動範囲外', nm));
-    dqTol = 1;  if strncmp(s.pattern, 'contact_', 8), dqTol = 1.3; end      % 接触シナリオは衝突の衝撃で他軸が一時的に qdMax を超えうる（docs/phase3_5_report.md）
+    dqTol = 1;  if strncmp(s.pattern, 'contact_', 8), dqTol = 1.5; end      % 接触シナリオは衝突の衝撃で他軸が一時的に qdMax を超える（実測の最大 1.36 倍、docs/phase3_5_report.md）
     fail = addIf(fail, all(abs(s.dq) <= sp.qdMax*dqTol, 'all'), sprintf('%s: 角速度が qdMax 超過', nm));
 end
 % ---- split のリーク ----

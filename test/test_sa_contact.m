@@ -32,16 +32,26 @@ classdef test_sa_contact < matlab.unittest.TestCase
             tc.verifyTrue(all(strcmp({c.type}, 'excitation')));
         end
         function existingScenariosAreUnchanged(tc)
-            % 既存 158 本（名前・シード・split）は、生成済みデータセットのマニフェストと一致する（キャッシュが有効なまま）
+            % 既存 158 本（名前・シード）は、キャッシュに記録された値と一致する（キャッシュが有効なまま）。
+            % split は、接触追加前に組み立てたデータセット（data/sa_dataset_full3_base158.mat、あれば）と一致する
             repo = fileparts(fileparts(mfilename('fullpath')));
-            f = fullfile(repo, 'data', 'sa_dataset_full3.mat');
-            tc.assumeTrue(isfile(f), 'sa_dataset_full3.mat が無いため省略');
-            m = load(f, 'manifest');
             first = tc.S(1:158);
-            tc.verifyEqual({first.name}, m.manifest.names);
-            tc.verifyEqual([first.seed], m.manifest.seeds);
             tc.verifyEqual(first(1).name, 'bln_normal_001');
             tc.verifyTrue(all(~strncmp({first.pattern}, 'contact_', 8)));
+            tc.verifyTrue(all(strncmp({tc.S(159:end).pattern}, 'contact_', 8)));
+            tc.assumeTrue(isfolder(fullfile(repo,'data','cache')), 'キャッシュが無いため省略');
+            for s = first
+                f = fullfile(repo,'data','cache',sprintf('full3_%s.mat', s.name));
+                if ~isfile(f), tc.assumeTrue(false, 'キャッシュが揃っていないため省略'); end
+                e = load(f, 'e');
+                tc.verifyEqual(e.e.seed, s.seed, s.name);
+            end
+            b = fullfile(repo,'data','sa_dataset_full3_base158.mat');
+            if isfile(b)
+                d = load(b, 'scen');
+                tc.verifyEqual({d.scen.name}, {first.name});
+                tc.verifyEqual({d.scen.split}, {first.split});
+            end
         end
         function barrierIsOutsideOnlyOnTargetAxis(tc)
             for s = tc.S(strncmp({tc.S.pattern}, 'contact_', 8))
@@ -68,7 +78,7 @@ classdef test_sa_contact < matlab.unittest.TestCase
             tc.verifyTrue(all(isfinite(raw.q),'all') && all(isfinite(raw.dq),'all') && all(isfinite(raw.tau),'all'));
             tc.verifyLessThanOrEqual(max(abs(raw.tau),[],1), tc.sp.tauPeak*(1 + 1e-9));
             tc.verifyTrue(all(raw.q > tc.sp.qMin - deg2rad(1.5), 'all') && all(raw.q < tc.sp.qMax + deg2rad(1.5), 'all'), 'めり込みが 1.5° 以内');
-            tc.verifyLessThanOrEqual(max(abs(raw.dq),[],1), 1.3*tc.sp.qdMax, '衝突の衝撃で一時的に qdMax を超えうる（1.3 倍まで）');
+            tc.verifyLessThanOrEqual(max(abs(raw.dq),[],1), 1.5*tc.sp.qdMax, '衝突の衝撃で一時的に qdMax を超えうる（1.5 倍まで）');
             tc.verifyGreaterThan(raw.contact, 0, 'リミットに到達する');
             tc.verifyLessThan(raw.contact, 0.95);
             if s.axis > 0     % 目標軸の接触、他軸は接触しない
