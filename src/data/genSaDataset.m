@@ -47,14 +47,14 @@ if ~isempty(mine)
     mE = buildSaExcitation(nAx, struct('modelName',nE,'slxPath',fullfile(workDir,[nE '.slx'])));
     mC = buildSaClosedLoop(nAx, struct('modelName',nC,'slxPath',fullfile(workDir,[nC '.slx'])));
     models = struct('excite',mE,'closed',mC);
-    nNew = 0;
+    nNew = 0;  repoState = saRepoState();
     for k = mine
         if nNew >= opts.maxScen, break; end
         s = S(k);  t0 = tic;
         raw = runSaScenario(s, models);
         e = struct('name',s.name,'seed',s.seed,'q',raw.q,'dq',raw.dq,'tau',raw.tau, ...
             'qref',raw.qref,'dqref',raw.dqref,'q0',raw.q0,'dq0',raw.dq0,'contact8k',raw.contact,'fs',c.fsSim, ...
-            'wall',toc(t0)); %#ok<NASGU>
+            'wall',toc(t0),'repo',repoState,'matlab',version); %#ok<NASGU>
         tmp = [cacheFn(s) '.tmp'];  save(tmp, 'e', '-mat');  movefile(tmp, cacheFn(s));   % 書き込み途中のファイルを残さない
         nNew = nNew + 1;
         fprintf('  [%3d/%3d] %-22s %-10s %6.1f s 実行 %6.1f s 経過\n', k, numel(S), s.name, s.type, raw.t(end), toc(t0));

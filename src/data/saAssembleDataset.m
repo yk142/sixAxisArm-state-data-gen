@@ -9,12 +9,16 @@ function ds = saAssembleDataset(S, loadFn, nAx, opts)
 if nargin < 4, opts = struct(); end
 if ~isfield(opts,'preset'), opts.preset = ''; end
 c = sa_config();  sp = saParams(nAx);  tol = deg2rad(0.1);
+genRepo = {};  genMatlab = {};  wall = zeros(numel(S),1);
 scen = repmat(struct('name','','pattern','','type','','phase',[],'split','','seed',0,'q',[],'dq',[], ...
     'tau',[],'tauInst',[],'qref',[],'dqref',[],'atLimit',[],'contact8k',0,'nTransition',0), numel(S), 1);
 for k = 1:numel(S)
     s = S(k);  e = loadFn(s);
     assert(e.seed == s.seed && strcmp(e.name, s.name), 'saAssembleDataset:cache', ...
         'キャッシュがシナリオ表と一致しません: %s', s.name);
+    if isfield(e,'repo'), genRepo{end+1} = sprintf('%s|%d|%s', e.repo.commit, e.repo.dirty, e.repo.diffHash); end %#ok<AGROW>
+    if isfield(e,'matlab'), genMatlab{end+1} = e.matlab; end %#ok<AGROW>
+    if isfield(e,'wall'), wall(k) = e.wall; end
     D = saDownsample(e, c.fsSim, c.fsData);
     lim = any(D.q <= sp.qMin + tol | D.q >= sp.qMax - tol, 2);       % リミット拘束（0.1° 以内または外側）
     atLimit = lim(1:end-1) | lim(2:end);
@@ -53,6 +57,10 @@ m.downsample = '状態は瞬時値の間引き、トルクは区間の台形平�
 m.params = sp;
 m.parentCommit = gitHead(c.parentDir);  m.repoCommit = gitHead(c.rootDir);
 m.matlab = version;
+% 生成時の来歴（キャッシュごとに記録。'コミット|未コミット差分の有無|差分ハッシュ'）。全件が同じ値でなければ複数並ぶ
+m.genRepo = unique(genRepo);  m.genMatlab = unique(genMatlab);
+m.genClean = ~isempty(genRepo) && numel(m.genRepo) == 1 && all(cellfun(@(x) contains(x,'|0|'), m.genRepo)) && numel(genRepo) == numel(S);
+m.wallTotal = sum(wall);  m.wall = wall(:)';
 ds.scen = scen;  ds.stats = stats;  ds.scale = scale;  ds.manifest = m;
 end
 
@@ -68,6 +76,6 @@ end
 
 function h = gitHead(d)
 h = '';
-[st, out] = system(sprintf('git -C "%s" rev-parse HEAD', d));
+[st, out] = system(sprintf('git --no-pager -C "%s" rev-parse HEAD', d));
 if st == 0, h = strtrim(out); end
 end
