@@ -1,21 +1,27 @@
 classdef test_sa_excitation < matlab.unittest.TestCase
-%TEST_SA_EXCITATION 腕 3 軸の開ループ励振モデル（軸ごとのバリア＋トルク飽和）の検証（issue #11）。
+%TEST_SA_EXCITATION 開ループ励振モデル（軸ごとのバリア＋トルク飽和）の検証（3 軸: issue #11、6 軸: issue #17）。
 %   実行: results = runtests('test/test_sa_excitation.m')
+
+    properties (ClassSetupParameter)
+        nAx = {3, 6};
+    end
 
     properties
         sp
+        pose
         mdl
         tmpDir
     end
 
     methods (TestClassSetup)
-        function build(tc)
+        function build(tc, nAx)
             repo = fileparts(fileparts(mfilename('fullpath')));
             addpath(fullfile(repo,'config'), genpath(fullfile(repo,'src')));
-            tc.sp = saParams(3);
+            tc.sp = saParams(nAx);
+            pose6 = [0.2 -0.9 1.0 0.3 0.6 -0.3];  tc.pose = pose6(1:nAx)';
             tc.tmpDir = tempname;  mkdir(tc.tmpDir);
-            tc.mdl = buildSaExcitation(3, struct('modelName','sa_excite3_test', ...
-                'slxPath',fullfile(tc.tmpDir,'sa_excite3_test.slx')));
+            tc.mdl = buildSaExcitation(nAx, struct('modelName',sprintf('sa_excite%d_test',nAx), ...
+                'slxPath',fullfile(tc.tmpDir,sprintf('sa_excite%d_test.slx',nAx))));
         end
     end
 
@@ -31,20 +37,20 @@ classdef test_sa_excitation < matlab.unittest.TestCase
             % 各軸 ±tauPeak の一様乱数を holdSteps ステップ（8 kHz）ごとに更新
             t = (0:1/8000:T)';  K = ceil(numel(t)/holdSteps);
             rs = RandStream('mt19937ar','Seed',seed);
-            u = tc.sp.tauPeak.*(2*rand(rs,K,3) - 1);
+            u = tc.sp.tauPeak.*(2*rand(rs,K,tc.sp.nAx) - 1);
             tauEx = u(min(floor((0:numel(t)-1)'/holdSteps)+1, K), :);
         end
         function g = gravTorque(tc, q)
             z = zeros(6,1);  p = c8_params(sa_config().meshDir);
-            g = c8RNEA([q(:); zeros(3,1)], z, z, p);  g = g(1:3)';
+            g = c8RNEA([q(:); zeros(6-tc.sp.nAx,1)], z, z, p);  g = g(1:tc.sp.nAx)';
         end
     end
 
     methods (Test)
         function parameters(tc)
             sp = tc.sp;
-            tc.verifyEqual(sp.nAx, 3);
-            tc.verifyTrue(all(sp.Mmin <= sp.Mmean) && all(sp.Mmean <= sp.Mmax));
+            tc.verifyTrue(any(sp.nAx == [3 6]));
+            tc.verifyTrue(all(sp.Mmin <= sp.Mmean*(1 + 1e-12)) && all(sp.Mmean <= sp.Mmax*(1 + 1e-12)));   % 手首は姿勢でほぼ一定（丸め誤差を許容）
             tc.verifyTrue(all(sp.Mmin > 0));
             tc.verifyEqual(sp.tauPeak, 3*sp.tauRated, 'RelTol', 1e-12);
         end
@@ -62,11 +68,19 @@ classdef test_sa_excitation < matlab.unittest.TestCase
             setSaBarrier(tc.mdl, tc.sp, 0.85, 0.60);      % 既定に戻す
         end
 
+        function barrierTorqueExceedsPeakAtLimit(tc)
+            % リミット位置でのバリアトルク（Kp·margin）が tauPeak の 1.5 倍以上（慣性の小さい手首でも tauPeak の励振を止められる）
+            kp = -str2num(get_param([tc.mdl '/KpBar'],'Gain'));   %#ok<ST2NM>
+            margin = 0.15*(tc.sp.qMax - tc.sp.qMin)/2;
+            tc.verifyGreaterThanOrEqual(kp.*margin./tc.sp.tauPeak, 1.5*(1 - 1e-9));
+            tc.verifyGreaterThanOrEqual(kp, tc.sp.Mmean*60^2*(1 - 1e-9));
+        end
+
         function insideBandIsTransparent(tc)
             % 安全帯の内側では、励振トルクがそのまま印加される（励振の分布を歪めない）
-            q0 = [0.2; -0.9; 1.0];
+            q0 = tc.pose;
             t = (0:1/8000:0.3)';  rs = RandStream('mt19937ar','Seed',2);
-            tauEx = tc.gravTorque(q0) + 0.03*tc.sp.tauRated.*(2*rand(rs,1,3) - 1) + 0*t;
+            tauEx = tc.gravTorque(q0) + 0.03*tc.sp.tauRated.*(2*rand(rs,1,tc.sp.nAx) - 1) + 0*t;
             o = simSa(tc.mdl, t, tauEx, q0);
             mid = (tc.sp.qMax + tc.sp.qMin)/2;  half = 0.85*(tc.sp.qMax - tc.sp.qMin)/2;
             tc.verifyTrue(all(o.q > mid - half, 'all') && all(o.q < mid + half, 'all'));
@@ -75,7 +89,7 @@ classdef test_sa_excitation < matlab.unittest.TestCase
 
         function strongExcitationRespectsLimits(tc)
             % 各軸 ±tauPeak（飽和）の乱数トルクを 2 s。可動域・最大速度・最大トルクを守り、発散しない
-            q0 = [0.2; -0.9; 1.0];
+            q0 = tc.pose;
             for seed = [5 6]
                 tauEx = tc.randomHold(seed, 2, 400);
                 o = simSa(tc.mdl, (0:1/8000:2)', tauEx, q0);
@@ -88,8 +102,8 @@ classdef test_sa_excitation < matlab.unittest.TestCase
 
         function freeFallStaysInsideBand(tc)
             % 無トルクの自由落下でも、ソフトバリアで止まり、リミットに接触しない
-            q0 = [0; -pi/2; 0.9];
-            o = simSa(tc.mdl, (0:1/8000:3)', zeros(1,3), q0);
+            q6 = [0; -pi/2; 0.9; 0; 0.6; 0];  q0 = q6(1:tc.sp.nAx);
+            o = simSa(tc.mdl, (0:1/8000:3)', zeros(1,tc.sp.nAx), q0);
             tc.verifyTrue(all(isfinite(o.q),'all'));
             tc.verifyTrue(all(o.q > tc.sp.qMin, 'all') && all(o.q < tc.sp.qMax, 'all'));
             tc.verifyTrue(all(abs(o.dq) < tc.sp.qdMax, 'all'));

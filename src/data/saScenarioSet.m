@@ -1,6 +1,6 @@
 function S = saScenarioSet(nAx, preset)
 %SASCENARIOSET 学習データ生成のシナリオ表を返す（docs/phase2_design.md。J2 版の構成を軸ごとに拡張）。
-%   S = SASCENARIOSET(nAx, preset)   nAx = 3（6 軸は Phase 2-4）、preset = 'full'（既定）| 'small'（動作確認用）
+%   S = SASCENARIOSET(nAx, preset)   nAx = 3 | 6、preset = 'full'（既定）| 'small'（動作確認用）
 %
 %   S は構造体配列。主なフィールド:
 %     name, pattern, type ('excitation'|'hold'|'ptp'), phase (1|2|'benchmark'), split, seed, duration [s]
@@ -12,7 +12,7 @@ function S = saScenarioSet(nAx, preset)
 %   full（3 軸）: 158 本、励振・保持・PTP の継続時間の合計 約 1,290 s（J2 版の約半分。設計書の規模）。
 %   初期状態は Sobol 列（2·nAx 次元、digital shift で seed 固定）で、バリア帯の内側・リミットから 2° 以上内側に取る。
 %   train / val / test はパターンごとに 70 / 15 / 15（シード固定）、PTP は 'benchmark'。
-assert(nAx == 3, 'saScenarioSet:nAx', '現在は 3 軸のみ対応（6 軸は Phase 2-4）');
+assert(any(nAx == [3 6]), 'saScenarioSet:nAx', 'nAx は 3 または 6');
 if nargin < 2, preset = 'full'; end
 c = sa_config();  sp = saParams(nAx);  p = c8_params(c.meshDir);
 d2r = pi/180;
@@ -21,13 +21,16 @@ qLo = sp.qMin + (1-0.85)*(sp.qMax-sp.qMin)/2 + 2*d2r;     % 初期状態の範�
 qHi = sp.qMax - (1-0.85)*(sp.qMax-sp.qMin)/2 - 2*d2r;
 dqI = 0.6 * sp.qdMax * 0.8;                               % 初期角速度の範囲（速度バリア帯の 80%）
 
-% 代表姿勢（J1, J2, J3 [rad]。J2 は重力の効きが大きく変わる範囲、J3 は肘の曲げ）。叩き台
-postures = [ 0.0 -0.5  0.5
-             0.8 -1.2  1.5
-            -0.8  0.5  0.3
-             1.5 -1.9  2.0
-            -1.5 -0.3  1.0
-             0.0 -2.2  1.0];
+% 代表姿勢（J1〜J6 [rad]。J2 は重力の効きが大きく変わる範囲、J3 は肘の曲げ。叩き台）
+%   手首 J4〜J6: p1〜p4 は J5 を 0 から 0.5 rad 以上離した通常姿勢、p5 は特異点近傍（J5 = 0.2 rad）、p6 は J5 = 0（特異点）。
+%   3 軸では先頭 3 列のみ使う。
+postures = [ 0.0 -0.5  0.5   0.4  0.8 -0.4
+             0.8 -1.2  1.5  -0.5 -0.9  0.6
+            -0.8  0.5  0.3   0.3  1.2 -0.3
+             1.5 -1.9  2.0  -0.4 -0.5  0.5
+            -1.5 -0.3  1.0   0.0  0.2  0.0
+             0.0 -2.2  1.0   0.0  0.0  0.0];
+postures = postures(:, 1:nAx);
 
 % ---- パターン定義: {pattern, type, phase, 件数, 継続時間, ampRel, fMax} ----
 switch preset
@@ -47,10 +50,10 @@ switch preset
               'bln_low',   'excitation',1, 1, 2, 0.2,  5
               'freefall',  'excitation',1, 1, 1.5, 0.05, 5
               'chirp',     'excitation',2, 1, 3, 0.5, 20
-              'step',      'excitation',2, 3, 1, 1.0, 0
+              'step',      'excitation',2, nAx, 1, 1.0, 0
               'micro',     'excitation',2, 1, 2, 0.05, 5 };
         nHold = 1;  durHold = 2;  nNear = 1;  durNear = 2;  nPtp = 1;  speeds = [0.3 0.7];  nWp = 3;  durPtp = 10;
-        iPost = [1 2];
+        iPost = [1 2];  if nAx == 6, iPost = [1 2 5 6]; end      % 6 軸は特異点近傍（p5）・特異点（p6）も含める
     otherwise
         error('saScenarioSet:preset', '未知の preset: %s', preset);
 end
@@ -89,7 +92,7 @@ for ip = iPost
 end
 
 % ---- リミット近傍（閉ループ保持。軸ごと・両側。参照はリミットの 4° 内側、振れ幅 ±3°、強めの外乱）----
-base = [0 -0.5 0.8];                                      % 他軸の姿勢
+base = [0 -0.5 0.8 0 0.6 0];  base = base(1:nAx);          % 他軸の姿勢（J5 は特異点から離す）
 k = 0;
 for i = 1:nNear*nAx*2
     s = emptyScenario(nAx);
