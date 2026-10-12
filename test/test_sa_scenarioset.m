@@ -22,6 +22,37 @@ classdef test_sa_scenarioset < matlab.unittest.TestCase
             tc.verifyEqual(sum(strcmp({S.pattern},'nearlimit')), 12);
         end
 
+        function sixAxisTable(tc)
+            % 6 軸（issue #17）: 3 軸と同じパターン構成、状態は 6 軸、手首姿勢は p1〜p4 が特異点（J5=0）から離れ、p6 が J5=0
+            S = saScenarioSet(6, 'full');  S3 = saScenarioSet(3, 'full');
+            tc.verifyEqual(numel(unique({S.name})), numel(S));
+            tc.verifyEqual(numel(unique([S.seed])), numel(S));
+            tc.verifyEqual(size(S(1).q0), [1 6]);
+            ex = strcmp({S.type},'excitation');
+            tc.verifyEqual(sum(ex), sum(strcmp({S3.type},'excitation')));
+            tc.verifyEqual(sum(strcmp({S.pattern},'nearlimit')), 24);       % 6 軸 x 両側 x 2 周
+            tc.verifyEqual(sum(strcmp({S.type},'ptp')), 12);
+            tc.verifyEqual(sum(strcmp({S.type},'hold')) - 24, sum(strcmp({S3.type},'hold')) - 12);   % nearlimit を除く hold は同数
+            for ip = 1:6
+                h = S(strcmp({S.name}, sprintf('hold_p%d_001', ip)));
+                if ip <= 4, tc.verifyGreaterThanOrEqual(abs(h.posture(5)), 0.5, sprintf('p%d', ip));
+                else, tc.verifyLessThanOrEqual(abs(h.posture(5)), 0.2, sprintf('p%d', ip)); end
+            end
+            tc.verifyEqual(S(strcmp({S.name},'hold_p6_001')).posture(5), 0);
+            % 3 軸の姿勢は 6 軸の先頭 3 列と同じ
+            tc.verifyEqual(S(strcmp({S.name},'hold_p2_001')).posture(1:3), S3(strcmp({S3.name},'hold_p2_001')).posture);
+            % 初期状態はバリア帯の内側（6 軸）
+            sp = saParams(6);  q0 = vertcat(S(ex).q0);
+            lo = sp.qMin + 0.15*(sp.qMax-sp.qMin)/2 + deg2rad(2);  hi = sp.qMax - 0.15*(sp.qMax-sp.qMin)/2 - deg2rad(2);
+            tc.verifyTrue(all(q0 >= lo - 1e-12, 'all') && all(q0 <= hi + 1e-12, 'all'));
+            % nearlimit の姿勢: 対象軸がリミットの 4° 内側、他軸は J5 が特異点から離れている
+            for s = S(strcmp({S.pattern},'nearlimit'))
+                tc.verifyGreaterThan(abs(s.posture(5)), 0.5, s.name);
+                if s.axis == 5, continue; end
+                tc.verifyEqual(s.posture(5), 0.6, 'AbsTol', 1e-12, s.name);
+            end
+        end
+
         function namesAndSeedsAreUnique(tc)
             for preset = {'full','small'}
                 S = saScenarioSet(3, preset{1});
