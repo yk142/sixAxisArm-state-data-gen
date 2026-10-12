@@ -31,6 +31,8 @@ switch s.type
                 for j = 1:nAx
                     u(:,j) = u(:,j) + saSignal('bln', tVec, amp(j), struct('fMax',s.fMax,'seed',s.seed + 101*j));
                 end
+            case {'contact_fall','contact_drive','contact_bln','contact_bounce'}
+                u = contactTorque(s, tVec, sp, rs);
             otherwise         % bln_normal / bln_high / bln_low / freefall
                 for j = 1:nAx
                     u(:,j) = saSignal('bln', tVec, amp(j), struct('fMax',s.fMax,'seed',s.seed + 101*j));
@@ -73,6 +75,31 @@ raw.t = o.t;  raw.q = o.q;  raw.dq = o.dq;  raw.tau = o.tau;
 if strcmp(s.type,'excitation'), raw.dq0 = s.dq0; end
 nearLim = raw.q <= sp.qMin + deg2rad(0.1) | raw.q >= sp.qMax - deg2rad(0.1);
 raw.contact = mean(any(nearLim, 2));
+end
+
+function u = contactTorque(s, tVec, sp, ~)
+% リミット接触シナリオの入力トルク（docs/phase3_5_report.md）。目標軸 s.axis、向き s.side（+1: 上限側）
+nAx = numel(s.q0);  a = s.axis;  amp = sp.tauRated;
+if strcmp(s.pattern, 'contact_fall')           % 全軸無トルク＋微小 BLN
+    u = zeros(numel(tVec), nAx);
+    for j = 1:nAx
+        u(:,j) = saSignal('bln', tVec, s.ampRel*amp(j), struct('fMax',s.fMax,'seed',s.seed + 101*j));
+    end
+    return;
+end
+g = gravityTorque(s.q0, nAx);                  % 他軸は初期姿勢の重力保持＋微小 BLN
+u = repmat(g, numel(tVec), 1);
+for j = 1:nAx
+    u(:,j) = u(:,j) + saSignal('bln', tVec, 0.05*amp(j), struct('fMax',s.fMax,'seed',s.seed + 101*j));
+end
+switch s.pattern
+    case 'contact_drive'
+        u(:,a) = g(a) + s.side*s.ampRel*amp(a);
+    case 'contact_bln'
+        u(:,a) = g(a) + s.side*s.ampRel2*amp(a) + saSignal('bln', tVec, s.ampRel*amp(a), struct('fMax',s.fMax,'seed',s.seed + 101*a));
+    case 'contact_bounce'
+        u(:,a) = g(a) + s.side*s.ampRel2*amp(a);
+end
 end
 
 function g = gravityTorque(q, nAx)

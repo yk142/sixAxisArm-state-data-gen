@@ -12,8 +12,8 @@ classdef test_sa_scenarioset < matlab.unittest.TestCase
     methods (Test)
         function fullCounts(tc)
             S = saScenarioSet(3, 'full');
-            tc.verifyEqual(numel(S), 158);
-            tc.verifyEqual(sum([S.duration]), 1290);          % ptp は継続時間の上限（30 s × 12 本 = 360 s を含む）
+            tc.verifyEqual(numel(S), 218);                    % 158 + リミット接触 60（issue #27）
+            tc.verifyEqual(sum([S.duration]), 1506);          % ptp は継続時間の上限（30 s × 12 本 = 360 s を含む）
             pats = unique({S.pattern});
             for want = {'bln_normal','bln_high','bln_low','freefall','chirp','step','micro','nearlimit','ptp_v20','ptp_v80','hold_p1','hold_p6'}
                 tc.verifyTrue(ismember(want{1}, pats), want{1});
@@ -29,7 +29,7 @@ classdef test_sa_scenarioset < matlab.unittest.TestCase
             tc.verifyEqual(numel(unique([S.seed])), numel(S));
             tc.verifyEqual(size(S(1).q0), [1 6]);
             ex = strcmp({S.type},'excitation');
-            tc.verifyEqual(sum(ex), sum(strcmp({S3.type},'excitation')));
+            tc.verifyEqual(sum(ex), sum(strcmp({S3.type},'excitation') & ~strncmp({S3.pattern},'contact_',8)));   % 接触は 3 軸のみ
             tc.verifyEqual(sum(strcmp({S.pattern},'nearlimit')), 24);       % 6 軸 x 両側 x 2 周
             tc.verifyEqual(sum(strcmp({S.type},'ptp')), 12);
             tc.verifyEqual(sum(strcmp({S.type},'hold')) - 24, sum(strcmp({S3.type},'hold')) - 12);   % nearlimit を除く hold は同数
@@ -81,7 +81,7 @@ classdef test_sa_scenarioset < matlab.unittest.TestCase
         end
 
         function initialStatesAreInsideBand(tc)
-            sp = saParams(3);  S = saScenarioSet(3, 'full');  S = S(strcmp({S.type},'excitation'));
+            sp = saParams(3);  S = saScenarioSet(3, 'full');  S = S(strcmp({S.type},'excitation') & ~strncmp({S.pattern},'contact_',8));   % 接触はバリアの外から始まる
             q0 = vertcat(S.q0);  dq0 = vertcat(S.dq0);
             lo = sp.qMin + 0.15*(sp.qMax-sp.qMin)/2 + deg2rad(2);  hi = sp.qMax - 0.15*(sp.qMax-sp.qMin)/2 - deg2rad(2);
             tc.verifyTrue(all(q0 >= lo - 1e-12, 'all') && all(q0 <= hi + 1e-12, 'all'));

@@ -9,7 +9,7 @@ function S = saScenarioSet(nAx, preset)
 %     qSoftFrac, dqSoftFrac  ソフトバリアの安全帯比率（励振のみ。リミット接触は Phase 3 の追加枠）
 %     posture  hold の中心姿勢 [1 x nAx]、refAmp 参照の振れ幅 [rad]、refMargin 可動範囲端からの余裕 [rad]
 %     axis     step を与える軸（step のみ）、speedScale / nWp  ptp のパラメータ
-%   full（3 軸）: 158 本、励振・保持・PTP の継続時間の合計 約 1,290 s（J2 版の約半分。設計書の規模）。
+%   full（3 軸）: 158 本（＋リミット接触 60 本）、励振・保持・PTP の継続時間の合計 約 1,290 s（J2 版の約半分。設計書の規模）。
 %   初期状態は Sobol 列（2·nAx 次元、digital shift で seed 固定）で、バリア帯の内側・リミットから 2° 以上内側に取る。
 %   train / val / test はパターンごとに 70 / 15 / 15（シード固定）、PTP は 'benchmark'。
 assert(any(nAx == [3 6]), 'saScenarioSet:nAx', 'nAx は 3 または 6');
@@ -121,6 +121,48 @@ for is = 1:numel(speeds)
     end
 end
 
+% ---- リミット接触（3 軸のみ。docs/phase3_5_report.md。既存シナリオの後ろに追加し、既存のシード・初期状態・split を変えない）----
+%   励振モデルのバリアを目標軸だけリミットの外側（位置 1.10）へ移し、速度バリアを 0.80 にして機械ストッパへの衝突を取る。
+%   contact_fall  : 全軸無トルク（微小 BLN）で自由落下し、重力方向のリミットに衝突（バリアは全軸、位置 1.10・速度 0.80）
+%   contact_drive : 目標軸（axis, side）へ定トルク（0.3〜1.0 × 定格）で衝突・押し付け。他軸は重力保持＋微小 BLN
+%   contact_bln   : 目標軸に大振幅 BLN（1.0 × 定格、5 Hz）＋バイアス（0.15 × 定格、side 向き）、他軸は重力保持＋微小 BLN
+%   contact_bounce: 目標軸のリミットの 2° 手前から壁向きの初速（0.3〜0.6 × qdMax）で入る。J1 は壁向きのバイアス（+0.15）、
+%                   J2・J3 は壁から離れる向きのバイアス（−0.3）で、反発・往復による動的な接触を増やす（事前の実測）
+if nAx == 3 && strcmp(preset, 'full')
+    kinds = {'contact_fall', 12, 3; 'contact_drive', 18, 3; 'contact_bln', 18, 6; 'contact_bounce', 12, 1.5};   % {pattern, 本数, 継続時間}
+    for kd = 1:size(kinds,1)
+        for i = 1:kinds{kd,2}
+            s = emptyScenario(nAx);
+            s.pattern = kinds{kd,1};  s.type = 'excitation';  s.phase = 3;
+            s.name = sprintf('%s_%03d', s.pattern, i);
+            s.seed = c.seedBase + 300000 + 1000*kd + i;
+            rs = RandStream('twister','Seed',s.seed);
+            s.duration = kinds{kd,3};  s.fMax = 5;
+            s.axis = mod(i-1, nAx) + 1;  s.side = 1 - 2*(mod(floor((i-1)/nAx), 2) == 1);   % 軸を巡回し、次の周回で反対側
+            q0 = qLo + rand(rs,1,nAx).*(qHi - qLo);
+            s.qSoftFrac = 0.85*ones(1,nAx);  s.dqSoftFrac = 0.60*ones(1,nAx);
+            s.qSoftFrac(s.axis) = 1.10;  s.dqSoftFrac(s.axis) = 0.80;
+            switch s.pattern
+                case 'contact_fall'
+                    s.ampRel = 0.05;  s.axis = 0;  s.side = 0;
+                    q0 = 0.6*sp.qMin + rand(rs,1,nAx).*0.6.*(sp.qMax - sp.qMin);          % [0.6 qMin, 0.6 qMax] の乱数姿勢
+                    s.q0 = q0;  s.dq0 = (2*rand(rs,1,nAx) - 1) .* (0.5*dqI);
+                    s.qSoftFrac(:) = 1.10;  s.dqSoftFrac(:) = 0.80;
+                case 'contact_drive'
+                    s.ampRel = 0.3 + 0.7*rand(rs);  s.q0 = q0;  s.dq0 = zeros(1,nAx);
+                case 'contact_bln'
+                    s.ampRel = 1.0;  s.ampRel2 = 0.15;  s.q0 = q0;  s.dq0 = (2*rand(rs,1,nAx) - 1).*dqI;
+                case 'contact_bounce'
+                    a = s.axis;  base = [0.2 -0.5 0.8];  q0 = base(1:nAx) + 0.2*(2*rand(rs,1,nAx) - 1);      % 他軸は基準姿勢のまわり ±0.2 rad
+                    q0(a) = ternary(s.side > 0, sp.qMax(a), sp.qMin(a)) - s.side*2*d2r;
+                    s.q0 = q0;  s.dq0 = zeros(1,nAx);  s.dq0(a) = s.side*(0.3 + 0.3*rand(rs))*sp.qdMax(a);
+                    s.ampRel2 = ternary(a == 1, 0.15, -0.30);     % 壁向き（符号は side を掛ける）／J2・J3 は離れる向き
+            end
+            S = [S, s]; %#ok<AGROW>
+        end
+    end
+end
+
 % ---- train / val / test をパターンごとに 70/15/15 で分割（シードで決定的）----
 pats = unique({S.pattern}, 'stable');
 for ip = 1:numel(pats)
@@ -143,7 +185,7 @@ end
 function s = emptyScenario(nAx)
 s = struct('name','','pattern','','type','','phase',1,'split','','seed',0,'duration',0, ...
     'ampRel',0,'fMax',0,'q0',zeros(1,nAx),'dq0',zeros(1,nAx),'qSoftFrac',0.85,'dqSoftFrac',0.60, ...
-    'posture',zeros(1,nAx),'speedScale',0,'nWp',0,'refAmp',0,'refMargin',0,'axis',0);
+    'posture',zeros(1,nAx),'speedScale',0,'nWp',0,'refAmp',0,'refMargin',0,'axis',0,'side',0,'ampRel2',0);
 end
 
 function y = ternary(c, a, b)
