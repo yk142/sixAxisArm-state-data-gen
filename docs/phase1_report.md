@@ -58,7 +58,7 @@
 - 生成時間の再確認は未実施（Phase 0 の見積もりのまま。テスト全体は 1231 s）。
 
 ## 決定（2026-10-12、ユーザー）
-既定を **ode15s＋filterTc 1e-5** に切り替えた（armature の RMI は維持）。Phase 0 の「armature あり・ode14x のまま」を置き換える。
+既定を **ode15s＋filterTc 1e-5** に切り替えた（のち issue #7 で 1e-6 に変更。docs/phase2_0_report.md）（armature の RMI は維持）。Phase 0 の「armature あり・ode14x のまま」を置き換える。
 
 ## 次に決めること
 - Phase 2 で、トルク t_k が x_k → x_{k+1} のどの区間に効くかの定義（プラントへは 8 kHz 格子上の標本値＋線形補間で与えている）、出力の 8 kHz 格子への落とし方（`OutputOption`＝`SpecifiedOutputTimes` か補間）、可変刻みでの再現性（ビット一致）を決める。

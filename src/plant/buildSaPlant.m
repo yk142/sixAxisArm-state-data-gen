@@ -5,7 +5,7 @@ function mdl = buildSaPlant(nAx, opts)
 %     opts.modelName  (既定 'sa_plant<nAx>')
 %     opts.slxPath    (既定 <dataDir>/models/<modelName>.slx)
 %     opts.solver     'ode15s'（既定。可変刻み、MaxStep = 1/8 kHz、RelTol 1e-6、AbsTol 1e-8）または 'ode14x'（固定刻み 8 kHz）
-%     opts.filterTc   Solver Configuration の FilteringTimeConstant [s]（既定 1e-5。Simscape の既定は 1e-3）。
+%     opts.filterTc   Solver Configuration の FilteringTimeConstant [s]（既定 1e-6。Simscape の既定は 1e-3）。
 %                     RMI（armature）の 1-D/3-D 接続の自動フィルタの時定数で、小さいほど応答の遅れが減る。
 %                     ode14x では 5e-4 以下で不安定になる（docs/phase1_report.md）。ode15s では 1e-6 まで安定
 %
@@ -21,7 +21,7 @@ if ~isfield(opts,'slxPath') || isempty(opts.slxPath)
     opts.slxPath = fullfile(c.dataDir,'models',[opts.modelName '.slx']);
 end
 if ~isfield(opts,'solver') || isempty(opts.solver), opts.solver = 'ode15s'; end
-if ~isfield(opts,'filterTc') || isempty(opts.filterTc), opts.filterTc = 1e-5; end
+if ~isfield(opts,'filterTc') || isempty(opts.filterTc), opts.filterTc = 1e-6; end
 assert(any(nAx == [3 6]), 'buildSaPlant:nAx', 'nAx は 3 または 6');
 slxDir = fileparts(opts.slxPath);
 if ~isfolder(slxDir), mkdir(slxDir); end

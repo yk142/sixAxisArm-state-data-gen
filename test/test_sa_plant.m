@@ -57,7 +57,7 @@ classdef test_sa_plant < matlab.unittest.TestCase
             tc.verifyEqual(get_param(m,'Solver'), 'ode15s');
             tc.verifyEqual(str2double(get_param(m,'MaxStep')), 1/8000, 'AbsTol', 1e-15);
             scb = find_system(m,'MaskType','Solver Configuration');
-            tc.verifyEqual(str2double(get_param(scb{1},'FilteringTimeConstant')), 1e-5, 'RelTol', 1e-9);
+            tc.verifyEqual(str2double(get_param(scb{1},'FilteringTimeConstant')), 1e-6, 'RelTol', 1e-9);
             o = simSa(m, [0;0.01], zeros(1,nAx), zeros(nAx,1));
             tc.verifyEqual(size(o.q,2), nAx);
             tc.verifyEqual(size(o.dq,2), nAx);
