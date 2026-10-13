@@ -116,10 +116,13 @@ classdef test_sa_pipeline < matlab.unittest.TestCase
             if r.dirty, tc.verifyEqual(numel(r.diffHash), 16); else, tc.verifyEmpty(r.diffHash); end
             clean = struct('commit',repmat('a',1,40),'dirty',false,'diffHash','');
             dirty = struct('commit',repmat('a',1,40),'dirty',true,'diffHash','0123456789abcdef');
-            % 全件がクリーンかつ同一コミット → genClean
+            % 全件がクリーン（未コミット差分なし）→ genClean。コミットが複数でもよい（issue #27: 接触の追加生成は別コミット）
             ds = tc.assemble(@(e, s) setfield(setfield(e,'repo',clean),'matlab','R-test')); %#ok<SFLD>
             tc.verifyTrue(ds.manifest.genClean);  tc.verifyEqual(numel(ds.manifest.genRepo), 1);
             tc.verifyEqual(ds.manifest.genMatlab, {'R-test'});
+            clean2 = struct('commit',repmat('b',1,40),'dirty',false,'diffHash','');
+            ds = tc.assemble(@(e, s) setfield(e,'repo',ternary(strcmp(s.name,'hold_p1_001'), clean2, clean))); %#ok<SFLD>
+            tc.verifyTrue(ds.manifest.genClean);  tc.verifyEqual(numel(ds.manifest.genRepo), 2);
             % 1 本でも dirty → genClean = false、来歴は 2 種類並ぶ
             ds = tc.assemble(@(e, s) setfield(e,'repo',ternary(strcmp(s.name,'hold_p1_001'), dirty, clean))); %#ok<SFLD>
             tc.verifyFalse(ds.manifest.genClean);  tc.verifyEqual(numel(ds.manifest.genRepo), 2);

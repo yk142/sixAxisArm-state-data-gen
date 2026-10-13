@@ -59,7 +59,8 @@ m.parentCommit = gitHead(c.parentDir);  m.repoCommit = gitHead(c.rootDir);
 m.matlab = version;
 % 生成時の来歴（キャッシュごとに記録。'コミット|未コミット差分の有無|差分ハッシュ'）。全件が同じ値でなければ複数並ぶ
 m.genRepo = unique(genRepo);  m.genMatlab = unique(genMatlab);
-m.genClean = ~isempty(genRepo) && numel(m.genRepo) == 1 && all(cellfun(@(x) contains(x,'|0|'), m.genRepo)) && numel(genRepo) == numel(S);
+% genClean: 全件に来歴があり、すべてが未コミット差分なしのコミットで生成されている（コミットは複数でもよい。genRepo に並ぶ）
+m.genClean = ~isempty(genRepo) && all(cellfun(@(x) contains(x,'|0|'), m.genRepo)) && numel(genRepo) == numel(S);
 m.wallTotal = sum(wall);  m.wall = wall(:)';
 ds.scen = scen;  ds.stats = stats;  ds.scale = scale;  ds.manifest = m;
 end
