@@ -7,7 +7,7 @@ classdef test_sa_contact < matlab.unittest.TestCase
         tmpDir
     end
     properties (TestParameter)
-        scenarioName = {'contact_fall_001','contact_drive_002','contact_drive_004','contact_bln_003','contact_bounce_001','contact_bounce_002','contact_bounce_006'};
+        scenarioName = {'contact_fall_001','contact_drive_002','contact_drive_004','contact_bln_003','contact_bounce_001','contact_bounce_002','contact_bounce_006','contact_bounce_020','contact_bounce_031'};
     end
     methods (TestClassSetup)
         function build(tc)
