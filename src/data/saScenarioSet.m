@@ -9,7 +9,7 @@ function S = saScenarioSet(nAx, preset)
 %     qSoftFrac, dqSoftFrac  ソフトバリアの安全帯比率（励振のみ。リミット接触は Phase 3 の追加枠）
 %     posture  hold の中心姿勢 [1 x nAx]、refAmp 参照の振れ幅 [rad]、refMargin 可動範囲端からの余裕 [rad]
 %     axis     step を与える軸（step のみ）、speedScale / nWp  ptp のパラメータ
-%   full（3 軸）: 158 本（＋リミット接触 60 本）、励振・保持・PTP の継続時間の合計 約 1,290 s（J2 版の約半分。設計書の規模）。
+%   full（3 軸）: 158 本（＋リミット接触 84 本）、励振・保持・PTP の継続時間の合計 約 1,290 s（J2 版の約半分。設計書の規模）。
 %   初期状態は Sobol 列（2·nAx 次元、digital shift で seed 固定）で、バリア帯の内側・リミットから 2° 以上内側に取る。
 %   train / val / test はパターンごとに 70 / 15 / 15（シード固定）、PTP は 'benchmark'。
 assert(any(nAx == [3 6]), 'saScenarioSet:nAx', 'nAx は 3 または 6');
@@ -129,7 +129,7 @@ end
 %   contact_bounce: 目標軸のリミットの 2° 手前から壁向きの初速（0.3〜0.6 × qdMax）で入る。J1 は壁向きのバイアス（+0.15）、
 %                   J2・J3 は壁から離れる向きのバイアス（−0.3）で、反発・往復による動的な接触を増やす（事前の実測）
 if nAx == 3 && strcmp(preset, 'full')
-    kinds = {'contact_fall', 12, 3; 'contact_drive', 18, 3; 'contact_bln', 18, 6; 'contact_bounce', 12, 1.5};   % {pattern, 本数, 継続時間}
+    kinds = {'contact_fall', 12, 3; 'contact_drive', 18, 3; 'contact_bln', 18, 6; 'contact_bounce', 36, 1.5};   % {pattern, 本数, 継続時間}
     for kd = 1:size(kinds,1)
         for i = 1:kinds{kd,2}
             s = emptyScenario(nAx);

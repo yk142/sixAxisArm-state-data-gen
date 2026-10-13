@@ -19,8 +19,8 @@ classdef test_sa_contact < matlab.unittest.TestCase
     methods (Test)
         function tableCounts(tc)
             c = tc.S(strncmp({tc.S.pattern}, 'contact_', 8));
-            tc.verifyEqual(numel(c), 60);
-            tc.verifyEqual(cellfun(@(p) sum(strcmp({c.pattern}, p)), {'contact_fall','contact_drive','contact_bln','contact_bounce'}), [12 18 18 12]);
+            tc.verifyEqual(numel(c), 84);
+            tc.verifyEqual(cellfun(@(p) sum(strcmp({c.pattern}, p)), {'contact_fall','contact_drive','contact_bln','contact_bounce'}), [12 18 18 36]);
             for p = {'contact_drive','contact_bln','contact_bounce'}
                 m = c(strcmp({c.pattern}, p{1}));
                 for a = 1:3, for sd = [-1 1]

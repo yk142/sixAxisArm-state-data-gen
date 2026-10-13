@@ -12,8 +12,8 @@ classdef test_sa_scenarioset < matlab.unittest.TestCase
     methods (Test)
         function fullCounts(tc)
             S = saScenarioSet(3, 'full');
-            tc.verifyEqual(numel(S), 218);                    % 158 + リミット接触 60（issue #27）
-            tc.verifyEqual(sum([S.duration]), 1506);          % ptp は継続時間の上限（30 s × 12 本 = 360 s を含む）
+            tc.verifyEqual(numel(S), 242);                    % 158 + リミット接触 84（issue #27）
+            tc.verifyEqual(sum([S.duration]), 1542);          % ptp は継続時間の上限（30 s × 12 本 = 360 s を含む）
             pats = unique({S.pattern});
             for want = {'bln_normal','bln_high','bln_low','freefall','chirp','step','micro','nearlimit','ptp_v20','ptp_v80','hold_p1','hold_p6'}
                 tc.verifyTrue(ismember(want{1}, pats), want{1});

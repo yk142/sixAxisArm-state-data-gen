@@ -10,9 +10,9 @@ classdef test_sa_eval < matlab.unittest.TestCase
         function reproSampleSelection(tc)
             S = saScenarioSet(3,'full');
             n = saReproSample(S,'sample');
-            tc.verifyEqual(numel(n), 39);                         % 3 軸 full 218 本（接触 4 パターンを含む）。接触追加前の 158 本では 31 本だった
+            tc.verifyEqual(numel(n), 39);                         % 3 軸 full 242 本（接触 4 パターンを含む）。接触追加前の 158 本では 31 本だった
             tc.verifyEqual(numel(unique(n)), 39);
-            tc.verifyEqual(numel(saReproSample(S,'all')), 218);
+            tc.verifyEqual(numel(saReproSample(S,'all')), 242);
             tc.verifyTrue(all(ismember(unique({S(ismember({S.name},n)).pattern}), unique({S.pattern}))));
             tc.verifyEqual(numel(unique({S(ismember({S.name},n)).pattern})), numel(unique({S.pattern})));   % 全パターンを含む
         end
