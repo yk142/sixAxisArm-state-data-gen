@@ -1,3 +1,6 @@
 /data/
 slprj/
 *.slxc
+__pycache__/
+.pytest_cache/
+*.pyc
