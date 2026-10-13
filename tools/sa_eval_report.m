@@ -10,16 +10,18 @@ T = saAnalyticResidual(ds, 100);
 col = struct('train',[0.2 0.4 0.8],'val',[0.1 0.7 0.3],'test',[0.9 0.6 0.1],'benchmark',[0.85 0.1 0.1]);
 mid = (sp.qMax + sp.qMin)/2;  half = (sp.qMax - sp.qMin)/2;
 % ---- 1. 軸別位相平面（train を背景、benchmark を重ねる）----
-f = figure('Visible','off','Position',[0 0 1500 450]);
+nc = min(nAx, 3);  nr = ceil(nAx/nc);                 % 3 列まで（6 軸は 2 行）。タイトルは 2 行にして重なりを避ける
+f = figure('Visible','off','Position',[0 0 1500 440*nr]);
+tl = tiledlayout(nr, nc, 'TileSpacing','compact', 'Padding','compact');
 for a = 1:nAx
-    subplot(1,nAx,a);  hold on;
+    nexttile;  hold on;
     X = r.X.train;  ii = 1:20:size(X,1);
     h1 = plot(X(ii,a), X(ii,nAx+a), '.', 'Color', col.train, 'MarkerSize', 1);
     B = r.X.benchmark;  h2 = plot(B(1:5:end,a), B(1:5:end,nAx+a), '.', 'Color', col.benchmark, 'MarkerSize', 3);
     xlabel(sprintf('q_%d（正規化）',a)); ylabel(sprintf('dq_%d / qdMax',a)); grid on; xlim([-1 1]); ylim([-1 1]);
-    title(sprintf('J%d: train が占めるセル %.0f%%、benchmark の被覆 %.1f%%', a, 100*r.axisFill(a), 100*r.axisPlane(a,3)));
+    title({sprintf('J%d', a), sprintf('train が占めるセル %.0f%%、benchmark の被覆 %.1f%%', 100*r.axisFill(a), 100*r.axisPlane(a,3))});
 end
-legend([h1 h2], {'train（1/20 に間引き）','benchmark（1/5 に間引き）'}, 'Location','southoutside');
+lg = legend([h1 h2], {'train（全点の 1/20 を描画）','benchmark（全点の 1/5 を描画）'});  lg.Layout.Tile = 'south';
 exportgraphics(f, fullfile(outDir,'phase_plane.png'), 'Resolution', 110);  close(f);
 % ---- 2. トルク分布（train と benchmark、軸別）----
 f = figure('Visible','off','Position',[0 0 1500 400]);
