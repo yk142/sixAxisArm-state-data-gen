@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from sa_nsm.model import LIM_UNIT, MODELS, limit_features
+from sa_nsm.model import LIM_UNIT, MODELS, GatedResidualNSM, limit_features
 from sa_nsm.train_lib import make_stats
 
 N_AX = 3
@@ -95,3 +95,17 @@ def test_training_step_reduces_loss():
     for _ in range(60):
         opt.zero_grad(); m.loss(m(xs, ana, lim), y, at).backward(); opt.step()
     assert m.loss(m(xs, ana, lim), y, at).item() < 0.5 * l0
+
+
+def test_gated_zone_uses_contact_sigma_near_limit():
+    n = 3
+    stats = {"x_mean": torch.zeros(8 * n), "x_std": torch.ones(8 * n), "sig_free": torch.full((2 * n,), 1e-3), "sig_contact": torch.ones(2 * n)}
+    m = GatedResidualNSM(n, stats, 16, 2)
+    lim = torch.full((4, 2 * n), 5.0)
+    lim[1, 0] = 0.2                                      # リミット近傍（ゲートが開く）だが at_limit ではない
+    at = torch.tensor([False, False, True, False])
+    assert m.zone(lim, at).tolist() == [False, True, True, False]
+    pred, y = torch.zeros(4, 2 * n), torch.zeros(4, 2 * n)
+    y[:, 0] = 0.5
+    want = (2 * 0.25 / 1e-6 + 0.25 / 1e-3 + 0.25) / 24      # 自由 2 行 σ_free、ゾーン内の非接触 1 行は幾何平均 √(1e-3)、at_limit 1 行は σ_contact
+    assert torch.isclose(m.loss(pred, y, at, lim), torch.tensor(want), rtol=1e-5)

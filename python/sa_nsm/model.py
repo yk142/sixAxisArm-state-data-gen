@@ -54,7 +54,7 @@ class PureNSM(Base):
     def forward(self, xs, ana, lim):
         return self.net((xs - self.x_mean) / self.x_std) * self.y_std + self.y_mean
 
-    def loss(self, pred, y, at_limit):
+    def loss(self, pred, y, at_limit, lim=None):
         return (((pred - y) / self.y_std) ** 2).mean()
 
 
@@ -73,7 +73,7 @@ class ResidualNSM(Base):
     def forward(self, xs, ana, lim):
         return ana + self.net(self.features(xs, ana, lim)) * self.sig_all
 
-    def loss(self, pred, y, at_limit):
+    def loss(self, pred, y, at_limit, lim=None):
         return (((pred - y) / self.sig_all) ** 2).mean()
 
 
@@ -83,10 +83,14 @@ class GatedResidualNSM(ResidualNSM):
     損失は、遷移の区分（at_limit）ごとの σ で標準化する。stats: x_mean, x_std, sig_free, sig_contact。"""
     kind = "C"
 
-    def __init__(self, n_ax, stats, width=256, depth=3):
+    def __init__(self, n_ax, stats, width=256, depth=3, width_c=None):
         Base.__init__(self, n_ax, stats, width, depth)
+        self.width_c = width_c or max(64, width // 2)
         self.net = mlp(8 * n_ax, 2 * n_ax, width, depth, zero_last=True)                   # 非接触の項
-        self.net_c = mlp(8 * n_ax, 2 * n_ax, max(64, width // 2), max(2, depth - 1), zero_last=True)   # 接触の項
+        self.net_c = mlp(8 * n_ax, 2 * n_ax, self.width_c, max(2, depth - 1), zero_last=True)   # 接触の項
+
+    def config(self):
+        return {**super().config(), "width_c": self.width_c}
 
     def gate(self, lim):
         n = self.n_ax
@@ -97,9 +101,22 @@ class GatedResidualNSM(ResidualNSM):
         z = self.features(xs, ana, lim)
         return ana + self.net(z) * self.sig_free + self.gate(lim) * self.net_c(z) * self.sig_contact
 
-    def loss(self, pred, y, at_limit):
-        sig = torch.where(at_limit.unsqueeze(-1), self.sig_contact, self.sig_free)
+    def zone(self, lim, at_limit):
+        """接触ゾーン = at_limit またはゲートが開いている（> 0.01）遷移。
+        at_limit は σ_contact、ゾーン内の非接触は σ_free と σ_contact の幾何平均、ゾーン外は σ_free で標準化する（リミット近傍で接触に入るかは入力だけでは決まらず、
+        σ_free で測るとゾーン内の接触項のわずかな出力に 10⁷ 倍の罰則が掛かるため）。"""
+        return at_limit | (self.gate(lim).squeeze(-1) > 0.01)
+
+    def loss(self, pred, y, at_limit, lim=None):
+        if lim is None:
+            sig = torch.where(at_limit.unsqueeze(-1), self.sig_contact, self.sig_free)
+        else:       # at_limit は σ_contact、ゾーン内の非接触は幾何平均、ゾーン外は σ_free
+            mid = torch.sqrt(self.sig_free * self.sig_contact)
+            sig = torch.where(at_limit.unsqueeze(-1), self.sig_contact, torch.where(self.zone(lim, at_limit).unsqueeze(-1), mid, self.sig_free))
         return (((pred - y) / sig) ** 2).mean()
+
+    def train_loss(self, xs, ana, lim, y, at_limit):
+        return self.loss(self(xs, ana, lim), y, at_limit, lim)
 
 
 MODELS = {"A": PureNSM, "B": ResidualNSM, "C": GatedResidualNSM}

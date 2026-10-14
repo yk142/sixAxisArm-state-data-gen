@@ -69,36 +69,59 @@ def mean_loss(model, data, bs=65536):
     model.eval()
     tot, n = 0.0, 0
     for xs, ana, lim, y, at in _batches(data, np.arange(len(data["y"])), bs):
-        tot += model.loss(model(xs, ana, lim), y, at).item() * len(y)
+        tot += model.loss(model(xs, ana, lim), y, at, lim).item() * len(y)
         n += len(y)
     return tot / n
 
 
-def train(kind, data, n_ax, seed, epochs=40, bs=4096, lr=2e-3, lr_end=1e-5, warmup=200, width=256, depth=3, log=print):
+@torch.no_grad()
+def group_losses(model, data):
+    """C の val 損失を区分別（自由・接触）に返す。"""
+    p = torch.as_tensor(predict(model, data)); y = torch.as_tensor(data["y"]); at = torch.as_tensor(data["at"])
+    zn = model.zone(torch.as_tensor(data["lim"]), at)
+    f = (((p[~zn] - y[~zn]) / model.sig_free) ** 2).mean().item()
+    c = (((p[zn] - y[zn]) / model.sig_contact) ** 2).mean().item()
+    return f, c
+
+
+def train(kind, data, n_ax, seed, epochs=40, bs=4096, lr=2e-3, lr_end=1e-5, warmup=200, width=256, depth=3, wd=0.0, width_c=None, log=print):
+    """wd > 0 は AdamW。C は自由ヘッドと接触ヘッドのチェックポイントを、それぞれの区分の val 損失で別々に選ぶ。"""
     torch.manual_seed(seed)
     rng = np.random.RandomState(seed)
-    model = MODELS[kind](n_ax, make_stats(kind, data["train"]), width, depth)
-    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    model = MODELS[kind](n_ax, make_stats(kind, data["train"]), width, depth, **({"width_c": width_c} if kind == "C" else {}))
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd) if wd > 0 else torch.optim.Adam(model.parameters(), lr=lr)
     N = len(data["train"]["y"])
     steps = epochs * ((N + bs - 1) // bs)
     sched = lambda s: (s + 1) / warmup if s < warmup else lr_end / lr + 0.5 * (1 - lr_end / lr) * (1 + np.cos(np.pi * (s - warmup) / max(1, steps - warmup)))
     sch = torch.optim.lr_scheduler.LambdaLR(opt, sched)
     best, best_state, hist = np.inf, None, []
+    best_f = best_c = np.inf
+    st_f = st_c = None
     for ep in range(epochs):
         model.train()
         t = time.time()
         tot = 0.0
         for xs, ana, lim, y, at in _batches(data["train"], rng.permutation(N), bs):
             opt.zero_grad()
-            loss = model.loss(model(xs, ana, lim), y, at)
+            loss = model.train_loss(xs, ana, lim, y, at) if hasattr(model, "train_loss") else model.loss(model(xs, ana, lim), y, at)
             loss.backward()
             opt.step(); sch.step()
             tot += loss.item() * len(y)
         vl = mean_loss(model, data["val"])
         hist.append({"epoch": ep + 1, "train": tot / N, "val": vl, "sec": time.time() - t})
+        if kind == "C":
+            vf, vc = group_losses(model, data["val"])
+            hist[-1].update(val_free=vf, val_contact=vc)
+            if vf < best_f:
+                best_f, st_f = vf, {k: v.clone() for k, v in model.state_dict().items() if k.startswith("net.")}
+            if vc < best_c:
+                best_c, st_c = vc, {k: v.clone() for k, v in model.state_dict().items() if k.startswith("net_c.")}
         if vl < best:
             best, best_state = vl, {k: v.clone() for k, v in model.state_dict().items()}
         log(f"[{kind} s{seed}] epoch {ep + 1}/{epochs} train {tot / N:.4g} val {vl:.4g} best {best:.4g} ({time.time() - t:.0f} s)")
+    if kind == "C":
+        best_state = {**best_state, **st_f, **st_c}
+        hist.append({"best_val_free": best_f, "best_val_contact": best_c})
     model.load_state_dict(best_state)
     return model, hist
 

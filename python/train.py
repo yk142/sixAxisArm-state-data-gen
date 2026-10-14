@@ -23,6 +23,10 @@ def main():
     ap.add_argument("--params", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--epochs", type=int, default=40)
+    ap.add_argument("--lr", type=float, default=2e-3)
+    ap.add_argument("--wd", type=float, default=0.0)
+    ap.add_argument("--width-c", type=int, default=None)
+    ap.add_argument("--tag", default="")
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--limit", type=int, default=None, help="train の遷移数を減らす（動作確認用）")
     a = ap.parse_args()
@@ -35,9 +39,9 @@ def main():
         import numpy as np
         sel = np.sort(np.random.RandomState(0).permutation(len(data["train"]["y"]))[:a.limit])
         data["train"] = {k: v[sel] for k, v in data["train"].items()}
-    out = os.path.join(a.out, f"{a.model}_s{a.seed}")
+    out = os.path.join(a.out, f"{a.model}{a.tag}_s{a.seed}")
     os.makedirs(out, exist_ok=True)
-    model, hist = train(a.model, data, ds.n_ax, a.seed, epochs=a.epochs)
+    model, hist = train(a.model, data, ds.n_ax, a.seed, epochs=a.epochs, lr=a.lr, wd=a.wd, width_c=a.width_c)
     torch.save(model.state_dict(), os.path.join(out, "model.pt"))
     json.dump(model.config(), open(os.path.join(out, "config.json"), "w"))
     json.dump(hist, open(os.path.join(out, "history.json"), "w"))
