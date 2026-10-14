@@ -29,8 +29,10 @@ def make_windows(ds, split, L, stride):
 class Predictor:
     """状態 (q, dq) とトルクから次状態を返す。kind: persist / analytic / hybrid / model。"""
 
-    def __init__(self, arm, ds, kind, model=None):
+    def __init__(self, arm, ds, kind, model=None, d_switch_deg=None):
         self.arm, self.kind, self.model, self.sc = arm, kind, model, ds.scale
+        self.d_switch = math.radians(d_switch_deg) if d_switch_deg is not None else None
+        self.n_model = self.n_all = 0           # switch: モデルを使った（窓×ステップ）数
 
     @torch.no_grad()
     def step(self, q, dq, tau):
@@ -44,11 +46,17 @@ class Predictor:
             lim = ((q <= arm.q_min + TOL_LIMIT) | (q >= arm.q_max - TOL_LIMIT)).any(-1, keepdim=True)
             return torch.where(lim, q, q + dqa), torch.where(lim, dq, dq + dva)
         D_Q, D_DQ = (torch.as_tensor(sc[k]) for k in ("D_Q_MAX", "D_DQ_MAX"))
+        near = None
+        if self.kind == "switch":       # いずれかの軸がリミットから d_switch 以内 → NN、他は解析
+            near = (torch.minimum(arm.q_max - q, q - arm.q_min) < self.d_switch).any(-1, keepdim=True)
+            self.n_model += int(near.sum()); self.n_all += len(q)
         xs = torch.cat([torch.sin(q), torch.cos(q), dq / torch.as_tensor(sc["DQ_MAX"]), tau / torch.as_tensor(sc["TAU_MAX"])], -1).float()
         ana = torch.cat([dqa / D_Q, dva / D_DQ], -1).float()
         lim = limit_features(q, arm.q_min, arm.q_max).float()
         p = self.model(xs, ana, lim).double()
         n = q.shape[-1]
+        if near is not None:
+            return torch.where(near, q + p[:, :n] * D_Q, q + dqa), torch.where(near, dq + p[:, n:] * D_DQ, dq + dva)
         return q + p[:, :n] * D_Q, dq + p[:, n:] * D_DQ
 
 
