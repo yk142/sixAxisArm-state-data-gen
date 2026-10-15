@@ -26,6 +26,7 @@ def main():
     ap.add_argument("--models", default="data/models/full3")
     ap.add_argument("--a-model", default="data/models/a_exp/r6_w512d4_e60_s0")
     ap.add_argument("--hold-name", default="nearlimit", help="保持シナリオ群の名前（接触評価では contact）")
+    ap.add_argument("--only-c", action="store_true", help="C(4-2) の 3 seed だけを評価する（issue #51。他モデルは別実行の結果を使う）")
     ap.add_argument("--out", required=True)
     ap.add_argument("--d-switch", type=float, default=0.5)
     ap.add_argument("--threads", type=int, default=4)
@@ -48,6 +49,8 @@ def main():
         "B（4-2）": Predictor(arm, ds, "model", eval_window.load_model(a.models, "B_s0", data["train"])),
         f"B 切替（d={a.d_switch}°）": Predictor(arm, ds, "switch", eval_window.load_model(a.models, "B_s0", data["train"]), d_switch_deg=a.d_switch),
     }
+    if a.only_c:
+        models = {f"C(4-2) s{k}": Predictor(arm, ds, "model", eval_window.load_model(a.models, f"C_s{k}", data["train"])) for k in range(3)}
     os.makedirs(a.out, exist_ok=True)
     res, traj = {}, {}
     for gname, sc in groups.items():

@@ -8,10 +8,15 @@ import matplotlib.pyplot as plt
 matplotlib.rcParams["font.family"] = ["Noto Sans CJK JP", "DejaVu Sans"]
 src = sys.argv[1] if len(sys.argv) > 1 else "data/eval/closed_contact3"
 out = sys.argv[2] if len(sys.argv) > 2 else "reports/issue-47"
+src2 = sys.argv[3] if len(sys.argv) > 3 else None          # 追加の評価結果（C など。issue #51）
 p = json.load(open("data/export/c8_params.json"))
-d = json.load(open(f"{src}/closed.json"))["contact"]; z = np.load(f"{src}/traj.npz")
+d = json.load(open(f"{src}/closed.json"))["contact"]; z = dict(np.load(f"{src}/traj.npz"))
+if src2:
+    for k, v in json.load(open(f"{src2}/closed.json"))["contact"].items():
+        d[k].update({m: r for m, r in v.items() if m != "truth"})
+    z.update({k: v for k, v in np.load(f"{src2}/traj.npz").items() if not k.endswith(("|truth", "|ref"))})
 sc = list(d); models = [k for k in d[sc[0]] if k != "truth"]
-cols = ["tab:gray", "tab:green", "tab:red", "tab:blue", "tab:orange"]
+cols = ["tab:gray", "tab:green", "tab:red", "tab:blue", "tab:orange", "tab:purple", "plum", "mediumorchid"]
 qmin, qmax = np.asarray(p["qMin"][:3]), np.asarray(p["qMax"][:3])
 DEG = 180 / np.pi
 
@@ -45,9 +50,9 @@ for r in rows:
 open(f"{out}/summary.md", "w").write("\n".join(lines) + "\n"); print("\n".join(lines))
 
 fig, ax = plt.subplots(1, 3, figsize=(17, 4.6))
-x = np.arange(len(sc)); w = 0.16
+x = np.arange(len(sc)); w = 0.8 / len(models)
 for i, m in enumerate(models):
-    ax[0].bar(x + (i - 2) * w, [max(max(d[s][m]["q_err_rms_deg"]), 1e-3) for s in sc], w, color=cols[i], label=m)
+    ax[0].bar(x + (i - (len(models) - 1) / 2) * w, [max(max(d[s][m]["q_err_rms_deg"]), 1e-3) for s in sc], w, color=cols[i], label=m)
 ax[0].set_yscale("log"); ax[0].set_xticks(x); ax[0].set_xticklabels([s.replace("cp_nearlimit_", "") for s in sc], rotation=60, fontsize=7)
 ax[0].set_ylabel("位置誤差 RMS（軸最大）[deg]"); ax[0].set_title("Simscape 閉ループ（押し付け）との差"); ax[0].legend(fontsize=7); ax[0].grid(alpha=.3, axis="y")
 for a_, s in zip(ax[1:], ("cp_nearlimit_j1p_002", "cp_nearlimit_j2m_001")):
