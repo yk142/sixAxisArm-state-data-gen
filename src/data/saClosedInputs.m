@@ -9,7 +9,19 @@ switch s.type
     case 'hold'
         tVec = (0:dt:s.duration)';
         [qr, dqr, ddqr] = saSmoothRef(tVec, s.posture, s.refAmp, 1.0, s.seed);
-        qr = min(max(qr, sp.qMin + s.refMargin), sp.qMax - s.refMargin);
+        if isfield(s,'pushDepth') && s.pushDepth > 0
+            % リミット押し付け（issue #47）: 目標軸の参照を、1.0〜2.5 s の間に滑らかに「リミットの pushDepth 外側」を中心とする振れへ移す
+            a = s.axis;  side = 2*(sp.qMax(a) - s.posture(a) < s.posture(a) - sp.qMin(a)) - 1;     % 姿勢が近い側のリミット（+1: 上限）
+            lim = ternary(side > 0, sp.qMax(a), sp.qMin(a));
+            w = smoothstep((tVec - 1.0)/1.5);
+            qr(:,a) = qr(:,a) + w.*(lim + side*s.pushDepth - s.posture(a));
+            o = setdiff(1:nAx, a);  qr(:,o) = min(max(qr(:,o), sp.qMin(o) + s.refMargin), sp.qMax(o) - s.refMargin);
+            for j = a
+                dqr(:,j) = gradient(qr(:,j), dt);  ddqr(:,j) = gradient(dqr(:,j), dt);
+            end
+        else
+            qr = min(max(qr, sp.qMin + s.refMargin), sp.qMax - s.refMargin);
+        end
         tauD = zeros(numel(tVec), nAx);
         for j = 1:nAx
             tauD(:,j) = saSignal('bln', tVec, s.ampRel*sp.tauRated(j), struct('fMax',s.fMax,'seed',s.seed + 1 + 101*j));
@@ -30,4 +42,12 @@ switch s.type
     otherwise
         error('saClosedInputs:type', 'hold または ptp のみ: %s', s.type);
 end
+end
+
+function y = ternary(c, a, b)
+if c, y = a; else, y = b; end
+end
+
+function y = smoothstep(x)
+x = min(max(x, 0), 1);  y = x.^2.*(3 - 2*x);
 end

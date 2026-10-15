@@ -25,6 +25,7 @@ def main():
     ap.add_argument("--params", default="data/export/c8_params.json")
     ap.add_argument("--models", default="data/models/full3")
     ap.add_argument("--a-model", default="data/models/a_exp/r6_w512d4_e60_s0")
+    ap.add_argument("--hold-name", default="nearlimit", help="保持シナリオ群の名前（接触評価では contact）")
     ap.add_argument("--out", required=True)
     ap.add_argument("--d-switch", type=float, default=0.5)
     ap.add_argument("--threads", type=int, default=4)
@@ -38,7 +39,8 @@ def main():
         arm.step = comp
     data = prepare(ds, arm, a.h5.replace(".h5", "_analytic.npz"), splits=("train",))
     scen, ctl = load_scenarios(a.cl)
-    groups = {"ptp": [s for s in scen if s.kind == "ptp"], "nearlimit": [s for s in scen if s.kind == "hold"]}
+    groups = {"ptp": [s for s in scen if s.kind == "ptp"], a.hold_name: [s for s in scen if s.kind == "hold"]}
+    groups = {k: v for k, v in groups.items() if v}
     models = {
         "解析": Predictor(arm, ds, "analytic"),
         "hybrid（リミットで状態維持）": Predictor(arm, ds, "hybrid"),
@@ -64,7 +66,7 @@ def main():
                     "v_err_rms": np.sqrt((ev ** 2).mean(0)).tolist(), "q_err_end_deg": (np.abs(eq[-1]) * DEG).tolist(),
                     "track_rms_deg": (np.sqrt(((q[i, :K + 1] - s.q_ref) ** 2).mean(0)) * DEG).tolist(),
                     "limit_frac": float(lim(q[i, :K + 1])), "K": K}
-                if i == 0 or gname == "nearlimit":
+                if i == 0 or gname != "ptp":
                     traj[f"{gname}/{s.name}/{mname}"] = q[i, :K + 1].astype(np.float32)
             print(f"  {mname}: {time.time() - t0:.0f} s", flush=True)
         for s in sc:
