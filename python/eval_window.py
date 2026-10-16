@@ -29,15 +29,15 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--L", type=int, nargs="+", default=[50, 200])
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--names", nargs="+", default=[f"{k}_s{s}" for k in "ABC" for s in range(3)], help="評価する NN（既定は 9 本。6 軸は B_s0 のみ）")
     a = ap.parse_args()
     torch.set_num_threads(a.threads)
     ds = Dataset(a.h5); n = ds.n_ax
     arm = Arm.from_json(a.params, n)
     data = prepare(ds, arm, a.h5.replace(".h5", "_analytic.npz"))
     preds = {"persist": Predictor(arm, ds, "persist"), "analytic": Predictor(arm, ds, "analytic"), "hybrid": Predictor(arm, ds, "hybrid")}
-    for k in "ABC":
-        for s in range(3):
-            preds[f"{k}_s{s}"] = Predictor(arm, ds, "model", load_model(a.models, f"{k}_s{s}", data["train"]))
+    for nm in a.names:
+        preds[nm] = Predictor(arm, ds, "model", load_model(a.models, nm, data["train"]))
     os.makedirs(a.out, exist_ok=True)
     res = {}
     for L in a.L:
@@ -75,7 +75,7 @@ def main():
                             "v_path_rmse": np.sqrt((ev ** 2).mean((0, 1))).tolist()}
                 res[f"L{L}/{sp}/{gname}"] = {"n": int(m.sum()), "models": r}
             if sp == "test":        # 軸別・horizon 別の誤差曲線（図用）
-                for k in ("persist", "analytic", "hybrid", "A_s0", "B_s0", "C_s0"):
+                for k in [k for k in ("persist", "analytic", "hybrid", "A_s0", "B_s0", "C_s0") if k in err]:
                     for gname in ("free", "contact"):
                         m = groups[gname]
                         if m.any():

@@ -45,15 +45,17 @@ def main():
     ap.add_argument("--models", nargs="+", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--L", type=int, nargs="+", default=[50, 200])
+    ap.add_argument("--no-a42", action="store_true", help="4-2 の A（3 軸の学習済み）を比較に入れない（6 軸では学習していない）")
     a = ap.parse_args()
     torch.set_num_threads(4)
     ds = Dataset(a.h5); n = ds.n_ax
     arm = FastArm.from_json(a.params, n)
     preds = {"persist": Predictor(arm, ds, "persist"), "解析 サブステップ1": Analytic(arm, 1), "解析 サブステップ2": Analytic(arm, 2)}
     # 4-2 の A（標準化 Δ、全データ学習）
-    import eval_window
-    data = prepare(ds, arm, a.h5.replace(".h5", "_analytic.npz"), splits=("train",))
-    preds["A 4-2"] = Predictor(arm, ds, "model", eval_window.load_model("data/models/full3", "A_s0", data["train"]))
+    if not a.no_a42:
+        import eval_window
+        data = prepare(ds, arm, a.h5.replace(".h5", "_analytic.npz"), splits=("train",))
+        preds["A 4-2"] = Predictor(arm, ds, "model", eval_window.load_model("data/models/full3", "A_s0", data["train"]))
     for m in a.models:
         preds[m] = AccelNet(ds, f"{a.exp}/{m}")
     os.makedirs(a.out, exist_ok=True)
