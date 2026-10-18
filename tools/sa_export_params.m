@@ -1,12 +1,14 @@
-function sa_export_params(outFile, nTest)
+function sa_export_params(outFile, nTest, payload)
 %SA_EXPORT_PARAMS 解析モデルのパラメータと、検証用の MATLAB 側の前進動力学の出力を JSON に書く（Python 移植の検証用、issue #33）。
 %   sa_export_params('data/export/c8_params.json', 200)
+%   sa_export_params('data/export/c8_params_pl3.json', 200, struct('mass',3))   % 手先ペイロード付き（issue #61。saApplyPayload）
 %   p        : c8_params（運動学・リンク慣性・armature・摩擦・ε・可動範囲・トルク容量・重力）
 %   test     : nAx = 3 と 6 の乱数状態（q, dq, tau）と、saFwdDyn の加速度（ddq）、g(q) と M(q) の対角
 repo = fileparts(fileparts(mfilename('fullpath')));
 addpath(fullfile(repo,'config'), genpath(fullfile(repo,'src')));
 if nargin < 2, nTest = 200; end
 p = c8_params(sa_config().meshDir);
+if nargin >= 3 && ~isempty(payload), p = saApplyPayload(p, payload); end
 o = struct();
 o.gravity = p.gravity;  o.baseRpy = p.baseOrigin.rpy;
 for i = 1:6
