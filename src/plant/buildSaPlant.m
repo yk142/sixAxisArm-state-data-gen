@@ -27,6 +27,7 @@ slxDir = fileparts(opts.slxPath);
 if ~isfolder(slxDir), mkdir(slxDir); end
 
 p = c8_params(c.meshDir);
+if isfield(opts,'payload'), p = saApplyPayload(p, opts.payload); end
 urdf6 = [tempname '.urdf'];  urdf = [tempname '.urdf'];
 cleanup = onCleanup(@() cellfun(@(f) delete_if_exists(f), {urdf6, urdf}));
 writeC8URDF(p, urdf6);
