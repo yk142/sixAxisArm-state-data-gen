@@ -45,22 +45,29 @@ def main():
     ap.add_argument("--b-model", default="data/models/full6")
     ap.add_argument("--a-model", default="data/models/a_exp6/r10_wd0.2_e100_s0")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--a-pl-models", nargs="*", default=[], help="ペイロード入力付き A（train_a.py --payload の出力）。複数 seed 可")
+    ap.add_argument("--b-pl-models", nargs="*", default=[], help="ペイロード反映ベースで再学習した B（root/name 形式。例 data/models/fullpl6/B_s0）")
     ap.add_argument("--no-nn", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--shard", default="0/1", help="i/k: グループを k 分割した i 番目だけ処理（並列実行用。出力は --out ごとに分ける）")
     a = ap.parse_args()
+    shard_i, shard_k = (int(x) for x in a.shard.split("/"))
     torch.set_num_threads(a.threads)
     ds = Dataset(a.h5, splits=("train",)); n = ds.n_ax
     nominal = FastArm.from_json(a.params_fmt.format(m=0), n)
     data = prepare(ds, nominal, a.h5.replace(".h5", "_analytic.npz"), splits=("train",))
     nn = {} if a.no_nn else {"A（調整後）": AccelNet(ds, a.a_model),
                              "B": Predictor(nominal, ds, "model", eval_window.load_model(a.b_model, "B_s0", data["train"]))}
+    a_pl = {f"A_pl（{os.path.basename(p)}）": AccelNet(ds, p) for p in a.a_pl_models}
+    b_pl = {f"B_pl（{os.path.basename(p)}）": eval_window.load_model(os.path.dirname(p), os.path.basename(p), data["train"]) for p in a.b_pl_models}
     os.makedirs(a.out, exist_ok=True)
     res, traj = [], {}
     with h5py.File(a.data, "r") as f:
         peak = f["controller/tauPeak"][:].ravel()
         groups = sorted({k.rsplit("_j", 1)[0] for k in f if k != "controller"})
         arms = {}
-        for gk in groups:
+        for gi, gk in enumerate(groups):
+            if gi % shard_k != shard_i: continue
             m = int(f[gk + "_j1"].attrs["payload"])
             arms.setdefault(m, FastArm.from_json(a.params_fmt.format(m=m), n))
             ctl_g = {"Kp": f[gk + "_j1/Kp"][:].ravel(), "Kd": f[gk + "_j1/Kd"][:].ravel(), "peak": peak}
@@ -69,6 +76,12 @@ def main():
             wn, zeta, step, t_step = float(at["wn"]), float(at["zeta"]), float(at["step"]), float(at["tStep"])
             plants = {"解析（ペイロード反映）": Predictor(arms[m], ds, "analytic"), "解析（公称）": Predictor(nominal, ds, "analytic")}
             plants.update(nn)
+            if not a.no_nn:
+                plants["B（ペイロード反映ベース、再学習なし）"] = Predictor(arms[m], ds, "model", nn["B"].model)
+            for k, v in a_pl.items():
+                v.payload = float(m); plants[k] = v
+            for k, v in b_pl.items():
+                plants[k] = Predictor(arms[m], ds, "model", v)
             t = np.arange(sc[0].K + 1) * DT
             q_by = {"Simscape": np.stack([s.q for s in sc])}
             for pn, pred in plants.items():

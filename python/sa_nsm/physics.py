@@ -21,6 +21,25 @@ def _rpy2rotm(r):
     return rz @ ry @ rx
 
 
+def params_with_payload(P, mass, offset=(0.0, 0.0, 0.05)):
+    """手先ペイロード（点質量 [kg]、arm6 座標系の offset [m]）を link6 に合成した params（`saApplyPayload.m` と同じ式）。"""
+    import copy
+    import numpy as np
+    P = copy.deepcopy(P)
+    if mass == 0:
+        return P
+    L = P["link"][5]                  # arm6（MATLAB の p.links(7) = ベース + 6 リンクの 7 番目）
+    c0, m0, off = np.asarray(L["com"], float).reshape(3), float(L["mass"]), np.asarray(offset, float)
+    m = m0 + mass
+    c = (m0 * c0 + mass * off) / m
+    I = np.asarray(L["inertiaC"], float).reshape(3, 3)
+    for mi, ci in ((m0, c0), (mass, off)):
+        d = ci - c
+        I = I + mi * ((d @ d) * np.eye(3) - np.outer(d, d))
+    L["mass"], L["com"], L["inertiaC"] = m, c.tolist(), I.tolist()
+    return P
+
+
 class Arm:
     """C8-A901S の解析モデル。`n_ax`: 可動軸数（3 または 6）。"""
 
@@ -41,9 +60,10 @@ class Arm:
             t(P[k]).reshape(6)[:n_ax] for k in ("qMin", "qMax", "qdMax", "tauPeak", "tauRated"))
 
     @classmethod
-    def from_json(cls, path, n_ax=3):
+    def from_json(cls, path, n_ax=3, payload=0.0):
         with open(path) as f:
-            return cls(json.load(f), n_ax)
+            P = json.load(f)
+        return cls(params_with_payload(P, payload) if payload else P, n_ax)
 
     # ---- 逆動力学（再帰ニュートン・オイラー法。バッチ [B,6]）----
     def rnea(self, q, dq, ddq):

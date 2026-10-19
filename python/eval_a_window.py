@@ -28,11 +28,17 @@ class AccelNet:
         d = ds.part["train"]; tr = np.where(~ds.at_limit("train"))[0]
         z = {k: np.zeros(1) for k in ("t_mean", "t_std")}
         act = {"silu": nn.SiLU, "gelu": nn.GELU, "tanh": nn.Tanh}[cfg["act"]]
-        self.m = Net(n, d["X_spec"][tr].mean(0), d["X_spec"][tr].std(0), np.zeros(2 * n), np.ones(2 * n), cfg["width"], cfg["depth"], act, cfg["drop"])
+        xm, xsd = d["X_spec"][tr].mean(0), d["X_spec"][tr].std(0)
+        self.use_payload, self.payload = bool(cfg.get("payload", False)), 0.0       # payload [kg]（issue #65。use_payload のとき入力に payload/8 を足す）
+        if self.use_payload:
+            xm, xsd = np.append(xm, 0.0), np.append(xsd, 1.0)                        # 値は state_dict で上書きされる
+        self.m = Net(n, xm, xsd, np.zeros(2 * n), np.ones(2 * n), cfg["width"], cfg["depth"], act, cfg["drop"])
         self.m.load_state_dict(torch.load(f"{path}/model.pt")); self.m.eval(); self.n, self.sc = n, ds.scale
     @torch.no_grad()
     def step(self, q, dq, tau):
         xs = torch.cat([torch.sin(q), torch.cos(q), dq / torch.as_tensor(self.sc["DQ_MAX"]), tau / torch.as_tensor(self.sc["TAU_MAX"])], -1).float()
+        if self.use_payload:
+            xs = torch.cat([xs, torch.full((len(xs), 1), self.payload / 8.0)], -1)
         p = self.m.raw(xs).double(); n = self.n
         return q + dq * DT + p[:, :n] * DT ** 2, dq + p[:, n:] * DT
 
