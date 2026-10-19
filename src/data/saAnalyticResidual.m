@@ -8,11 +8,11 @@ nAx = ds.manifest.nAx;  p = c8_params(sa_config().meshDir);  dt = 1/ds.manifest.
 sc = ds.scen;  n = numel(sc);
 rmsRes = zeros(n, nAx);  rmsAcc = zeros(n, nAx);
 for k = 1:n
-    s = sc(k);  K = s.nTransition;
+    s = sc(k);  K = s.nTransition;  pk = saApplyPayload(p, struct('mass', s.payload));
     i = unique(round(linspace(1, K, min(nPer, K))));
     A = (s.dq(i+1,:) - s.dq(i,:))/dt;  P = zeros(numel(i), nAx);
     for j = 1:numel(i)
-        P(j,:) = saFwdDyn(p, s.q(i(j),:)', s.dq(i(j),:)', s.tau(i(j),:)')';
+        P(j,:) = saFwdDyn(pk, s.q(i(j),:)', s.dq(i(j),:)', s.tau(i(j),:)')';
     end
     rmsRes(k,:) = sqrt(mean((A - P).^2, 1));  rmsAcc(k,:) = sqrt(mean(A.^2, 1));
 end

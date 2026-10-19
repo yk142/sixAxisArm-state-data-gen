@@ -26,6 +26,7 @@ def main():
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--wd", type=float, default=0.0)
     ap.add_argument("--width-c", type=int, default=None)
+    ap.add_argument("--payload-base", action="store_true", help="解析ベースを遷移ごとのペイロード（HDF5 の payload）で反映する（issue #65）")
     ap.add_argument("--tag", default="")
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--limit", type=int, default=None, help="train の遷移数を減らす（動作確認用）")
@@ -34,7 +35,12 @@ def main():
     ds = Dataset(a.h5)
     arm = Arm.from_json(a.params, ds.n_ax)
     cache = os.path.join(os.path.dirname(a.h5), os.path.basename(a.h5).replace(".h5", "_analytic.npz"))
-    data = prepare(ds, arm, cache)
+    arm_for = None
+    if a.payload_base:
+        from sa_nsm.physics_fast import FastArm
+        arms = {}
+        arm_for = lambda m: arms.setdefault(m, FastArm.from_json(a.params, ds.n_ax, payload=m))
+    data = prepare(ds, arm, cache, arm_for=arm_for)
     if a.limit:
         import numpy as np
         sel = np.sort(np.random.RandomState(0).permutation(len(data["train"]["y"]))[:a.limit])

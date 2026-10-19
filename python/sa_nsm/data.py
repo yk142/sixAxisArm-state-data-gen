@@ -50,3 +50,8 @@ class Dataset:
 
     def at_limit(self, split):
         return self.part[split]["at_limit"].astype(bool)
+
+    def payload(self, split):
+        """遷移ごとの手先ペイロード [kg]（HDF5 に無ければ 0）。"""
+        d = self.part[split]
+        return d["payload"].astype(np.float64) if "payload" in d else np.zeros(len(d["X"]))

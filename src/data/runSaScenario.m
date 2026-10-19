@@ -12,6 +12,8 @@ function raw = runSaScenario(s, models)
 nAx = numel(s.q0);  sp = saParams(nAx);  c = sa_config();  dt = 1/c.fsSim;
 raw = struct('t',[],'q',[],'dq',[],'tau',[],'qref',[],'dqref',[],'q0',zeros(1,nAx),'dq0',zeros(1,nAx),'contact',0);
 rs = RandStream('twister','Seed',s.seed);
+pl = 0;  if isfield(s,'payload'), pl = s.payload; end      % 手先ペイロード [kg]（issue #65。無ければ 0）
+plo = struct('mass', pl);
 
 switch s.type
     case 'excitation'
@@ -27,7 +29,7 @@ switch s.type
                     u(:,j) = saSignal('chirp', tVec, amp(j), struct('f0',0.1,'f1',s.fMax,'phiDeg',360*rand(rs)));
                 end
             case 'micro'      % 摩擦・粘性域: 初期姿勢の重力保持トルクのまわりに微小トルク
-                u = repmat(gravityTorque(s.q0, nAx), numel(tVec), 1);
+                u = repmat(gravityTorque(s.q0, nAx, plo), numel(tVec), 1);
                 for j = 1:nAx
                     u(:,j) = u(:,j) + saSignal('bln', tVec, amp(j), struct('fMax',s.fMax,'seed',s.seed + 101*j));
                 end
@@ -50,7 +52,7 @@ switch s.type
         for j = 1:nAx
             tauD(:,j) = saSignal('bln', tVec, s.ampRel*sp.tauRated(j), struct('fMax',s.fMax,'seed',s.seed + 1 + 101*j));
         end
-        REF = [tVec, qr, dqr, saFeedforward(tVec, qr, dqr, ddqr)];
+        REF = [tVec, qr, dqr, saFeedforward(tVec, qr, dqr, ddqr, plo)];
         o = simSaClosed(models.closed, tVec, REF, tauD, qr(1,:)');
         raw.qref = qr;  raw.dqref = dqr;  raw.q0 = qr(1,:);
 
@@ -102,7 +104,8 @@ switch s.pattern
 end
 end
 
-function g = gravityTorque(q, nAx)
-p = c8_params(sa_config().meshDir);  z = zeros(6,1);
+function g = gravityTorque(q, nAx, plo)
+p = c8_params(sa_config().meshDir);  if nargin >= 3, p = saApplyPayload(p, plo); end
+z = zeros(6,1);
 t = c8RNEA([q(:); zeros(6-nAx,1)], z, z, p);  g = t(1:nAx)';
 end

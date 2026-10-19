@@ -12,7 +12,8 @@ function info = saExportFlat(ds, outFile, opts)
 %     /<split>/X_spec     (N, 4d)  [sin q, cos q, dq/DQ_MAX, tau/TAU_MAX]  /<split>/Y_spec (N, 2d)  [Δq/D_Q_MAX, Δdq/D_DQ_MAX]
 %     /<split>/scenario_id (N,) int32  /scenarios/* の添字      /<split>/step (N,) int32  シナリオ内の遷移番号
 %     /<split>/at_limit   (N,) uint8   /<split>/qref (N, d)  遷移開始時刻の参照角（励振は NaN）
-%     /scenarios/{name,pattern,type,split}、{seed, n_transition, start}  start = そのシナリオの先頭行（所属 split の配列内、0 始まり）
+%     /<split>/payload (N,) 手先ペイロード [kg]（遷移ごと。シナリオの値）
+%     /scenarios/{name,pattern,type,split}、/scenarios/payload（[kg]）、{seed, n_transition, start}  start = そのシナリオの先頭行（所属 split の配列内、0 始まり）
 %        行は split 内でシナリオ順・step 順に並ぶので、シナリオ s は [start, start+n_transition) の連続区間
 %     /stats/{x_mean,x_std,y_mean,y_std}（train の全遷移）、/scale/*、/physics/*（可動範囲・トルク・摩擦の係数）
 %     ルート属性: manifest の主な項目（nAx, preset, scenario_hash, gen_clean, gen_repo, matlab など）と layout
@@ -36,7 +37,7 @@ for sp = splits
     if isempty(idx), continue; end
     K = [S(idx).nTransition];  N = sum(K);  off = [0 cumsum(K)];  start(idx) = off(1:end-1);
     X = zeros(N,3*nAx);  Y = zeros(N,2*nAx);  Xs = zeros(N,4*nAx);  Ys = zeros(N,2*nAx);
-    sid = zeros(N,1,'int32');  stp = zeros(N,1,'int32');  at = zeros(N,1,'uint8');  qr = nan(N,nAx);
+    pld = zeros(N,1);  sid = zeros(N,1,'int32');  stp = zeros(N,1,'int32');  at = zeros(N,1,'uint8');  qr = nan(N,nAx);
     for j = 1:numel(idx)
         s = S(idx(j));  r = off(j)+1 : off(j+1);  k = s.nTransition;
         q = s.q(1:k,:);  dq = s.dq(1:k,:);
@@ -44,6 +45,7 @@ for sp = splits
         Y(r,:) = [s.q(2:k+1,:) - q, s.dq(2:k+1,:) - dq];
         Xs(r,:) = [sin(q), cos(q), dq./sc.DQ_MAX, s.tau./sc.TAU_MAX];
         Ys(r,:) = [Y(r,1:nAx)./sc.D_Q_MAX, Y(r,nAx+1:end)./sc.D_DQ_MAX];
+        if isfield(s,'payload'), pld(r) = s.payload; end   % 無ければ 0 kg
         sid(r) = idx(j)-1;  stp(r) = (0:k-1)';  at(r) = uint8(s.atLimit(:));
         if ~isempty(s.qref), qr(r,:) = s.qref(1:k,:); end
     end
@@ -52,6 +54,7 @@ for sp = splits
     writeMat(outFile, ['/' sp '/X_spec'], cast(Xs), opts, 'sin q, cos q, dq/DQ_MAX, tau/TAU_MAX');
     writeMat(outFile, ['/' sp '/Y_spec'], cast(Ys), opts, 'd_q/D_Q_MAX, d_dq/D_DQ_MAX');
     writeMat(outFile, ['/' sp '/qref'],   cast(qr), opts, 'reference angle [rad] at the start of the step (hold/ptp scenarios), NaN otherwise');
+    writeVec(outFile, ['/' sp '/payload'],     pld, opts, 'end-effector payload mass [kg] (scenario value)');
     writeVec(outFile, ['/' sp '/scenario_id'], sid, opts, '0-based index into /scenarios');
     writeVec(outFile, ['/' sp '/step'],        stp, opts, '0-based transition index within the scenario');
     writeVec(outFile, ['/' sp '/at_limit'],    at,  opts, '1 = limit-bound transition');
@@ -65,6 +68,7 @@ writeStr(outFile, '/scenarios/name',    string({S.name}));
 writeStr(outFile, '/scenarios/pattern', string({S.pattern}));
 writeStr(outFile, '/scenarios/type',    string({S.type}));
 writeStr(outFile, '/scenarios/split',   string({S.split}));
+writeVec(outFile, '/scenarios/payload',      payloadOf(S), opts, 'payload mass [kg]');
 writeVec(outFile, '/scenarios/seed',         int64([S.seed]'), opts, '');
 writeVec(outFile, '/scenarios/n_transition', int32([S.nTransition]'), opts, '');
 writeVec(outFile, '/scenarios/start',        int32(start), opts, 'first row within its split arrays (0-based)');
@@ -120,4 +124,9 @@ end
 function writeStr(file, path, s)
 h5create(file, path, numel(s), 'Datatype', 'string');
 h5write(file, path, s(:));
+end
+
+function p = payloadOf(S)
+p = zeros(numel(S),1);
+if isfield(S,'payload'), p = double([S.payload]'); end
 end

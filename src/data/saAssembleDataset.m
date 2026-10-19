@@ -11,7 +11,7 @@ if ~isfield(opts,'preset'), opts.preset = ''; end
 c = sa_config();  sp = saParams(nAx);  tol = deg2rad(0.1);
 genRepo = {};  genMatlab = {};  wall = zeros(numel(S),1);
 scen = repmat(struct('name','','pattern','','type','','phase',[],'split','','seed',0,'q',[],'dq',[], ...
-    'tau',[],'tauInst',[],'qref',[],'dqref',[],'atLimit',[],'contact8k',0,'nTransition',0), numel(S), 1);
+    'tau',[],'tauInst',[],'qref',[],'dqref',[],'atLimit',[],'contact8k',0,'nTransition',0,'payload',0), numel(S), 1);
 for k = 1:numel(S)
     s = S(k);  e = loadFn(s);
     assert(e.seed == s.seed && strcmp(e.name, s.name), 'saAssembleDataset:cache', ...
@@ -19,12 +19,13 @@ for k = 1:numel(S)
     if isfield(e,'repo'), genRepo{end+1} = sprintf('%s|%d|%s', e.repo.commit, e.repo.dirty, e.repo.diffHash); end %#ok<AGROW>
     if isfield(e,'matlab'), genMatlab{end+1} = e.matlab; end %#ok<AGROW>
     if isfield(e,'wall'), wall(k) = e.wall; end
+    pl = 0;  if isfield(e,'payload'), pl = e.payload; end          % 手先ペイロード [kg]（無ければ 0）
     D = saDownsample(e, c.fsSim, c.fsData);
     lim = any(D.q <= sp.qMin + tol | D.q >= sp.qMax - tol, 2);       % リミット拘束（0.1° 以内または外側）
     atLimit = lim(1:end-1) | lim(2:end);
     scen(k) = struct('name',s.name,'pattern',s.pattern,'type',s.type,'phase',s.phase,'split',s.split,'seed',s.seed, ...
         'q',D.q,'dq',D.dq,'tau',D.tau,'tauInst',D.tauInst,'qref',D.qref,'dqref',D.dqref, ...
-        'atLimit',atLimit,'contact8k',e.contact8k,'nTransition',size(D.tau,1));
+        'atLimit',atLimit,'contact8k',e.contact8k,'nTransition',size(D.tau,1),'payload',pl);
 end
 % ---- 正規化統計: train の全遷移のみ（val / test / benchmark のリーク防止）----
 isTrain = strcmp({scen.split},'train');
@@ -51,7 +52,7 @@ m.fsRaw = c.fsSim;  m.fsData = c.fsData;  m.nScenario = numel(scen);
 m.nTrain = nnz(isTrain);  m.nVal = nnz(strcmp({scen.split},'val'));
 m.nTest = nnz(strcmp({scen.split},'test'));  m.nBenchmark = nnz(strcmp({scen.split},'benchmark'));
 m.nTransition = sum([scen.nTransition]);
-m.names = {S.name};  m.seeds = [S.seed];  m.durations = [S.duration];
+m.names = {S.name};  m.payload = [scen.payload];  m.seeds = [S.seed];  m.durations = [S.duration];
 m.scenarioHash = hashOf([m.seeds, m.durations]);
 m.downsample = '状態は瞬時値の間引き、トルクは区間の台形平均（saDownsample）';
 m.params = sp;

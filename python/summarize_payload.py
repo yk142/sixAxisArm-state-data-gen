@@ -6,16 +6,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 matplotlib.rcParams["font.family"] = ["Noto Sans CJK JP", "DejaVu Sans"]
-PL = ["Simscape", "解析（ペイロード反映）", "解析（公称）", "A（調整後）", "B"]
 OS_LIM = 5.0   # 許容オーバーシュート [%]
+SEEN = (0, 1, 8)   # 学習に含まれるペイロード（評価点のうち。学習は 0,1,2,4,6,8 kg）
+G_DOS, G_DST_REL, G_DST_ABS, G_POS = 2.0, 0.10, 0.020, 0.1    # 水準 G（docs/phase4_8）: ΔOS[pt]、Δ整定 相対/絶対[s]、ステップ区間位置誤差[deg]
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="data/eval/payload6/payload.json")
+    ap.add_argument("--data", nargs="+", default=["data/eval/payload6/payload.json"], help="payload.json（シャード分割時は複数）")
     ap.add_argument("--out", default="reports/issue-61")
     a = ap.parse_args()
-    R = json.load(open(a.data)); os.makedirs(a.out, exist_ok=True)
+    R = [r for f in a.data for r in json.load(open(f))]; os.makedirs(a.out, exist_ok=True)
+    PL = ["Simscape"] + [k for k in R[0] if k not in ("payload", "wn", "zeta", "axis", "Simscape")]
+    ncase = len({(r["payload"], r["wn"], r["zeta"]) for r in R})
     pls = sorted({r["payload"] for r in R}); wns = sorted({r["wn"] for r in R}); zs = sorted({r["zeta"] for r in R})
     axes = sorted({r["axis"] for r in R})
     G = lambda p, w, z, ax: next(r for r in R if r["payload"] == p and r["wn"] == w and r["zeta"] == z and r["axis"] == ax)
@@ -43,7 +46,7 @@ def main():
         best[p] = (w, z)
         L.append(f"| {p} | {w} | {z} | {s:.3f} | {M[p, 60, 1.0][2]:.3f} |")
     # 3. 各モデルの真値との差
-    L.append("\n## 3. 真値との差（全 72 ケース×6 軸）\n")
+    L.append("\n## 3. 真値との差（全 %d ケース×6 軸）\n" % ncase)
     L.append("| モデル | ステップ区間 位置誤差 最大[deg] | 全区間 位置誤差 最大[deg] | |ΔOS| 最大[%] | |Δ整定| 最大[s] |")
     L.append("|---|---|---|---|---|")
     for k in PL[1:]:
@@ -57,7 +60,7 @@ def main():
         L.append(f"| {k} | " + " | ".join(f"{max(r[k]['err_axis_max_deg'] for r in R if r['payload'] == p):.2e}" for p in pls) + " |")
     # 4. ブラインド（公称）モデルが予測する最適ゲインとの一致
     L.append("\n## 4. 最適ゲインの一致（ペイロード別）\n")
-    L.append("| ペイロード[kg] | 真値 | 解析（反映） | 解析（公称） | A | B |"); L.append("|---|---|---|---|---|---|")
+    L.append("| ペイロード[kg] | 真値 | " + " | ".join(PL[1:]) + " |"); L.append("|---|---|" + "---|" * len(PL[1:]))
     agree = {k: 0 for k in PL[1:]}
     for p in pls:
         row = [f"{best[p][0]}/{best[p][1]}"]
@@ -72,6 +75,31 @@ def main():
             agree[k] += (b == best[p]); row.append(f"{b[0]}/{b[1]}")
         L.append(f"| {p} | " + " | ".join(row) + " |")
     L.append("\n一致数（/%d）: " % len(pls) + "、".join(f"{k} {v}" for k, v in agree.items()))
+    # 5. 水準 G の判定（モデル別）
+    L.append(f"\n## 5. 水準 G の判定（ΔOS ≤ {G_DOS:g} pt、Δ整定 ≤ {G_DST_REL:.0%} かつ ≤ {G_DST_ABS*1e3:g} ms、ステップ区間位置誤差 ≤ {G_POS:g}°、最適ゲイン一致）\n")
+    L.append("ペイロードの区分: 既知 = " + "/".join(map(str, [p for p in pls if p in SEEN])) + " kg、未知 = " + "/".join(map(str, [p for p in pls if p not in SEEN])) + " kg（学習は 0,1,2,4,6,8 kg）\n")
+    L.append("| モデル | 区分 | |ΔOS| 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 最適ゲイン一致 | 水準 G |")
+    L.append("|---|---|---|---|---|---|---|---|")
+    for k in PL[1:]:
+        for nm, sel in (("既知", [p for p in pls if p in SEEN]), ("未知", [p for p in pls if p not in SEEN]), ("全体", pls)):
+            if not sel: continue
+            rs = [r for r in R if r["payload"] in sel]
+            dos = max(abs(r[k]["overshoot_pct"] - r["Simscape"]["overshoot_pct"]) for r in rs)
+            d = [(abs(r[k]["settle_s"] - r["Simscape"]["settle_s"]), r["Simscape"]["settle_s"]) for r in rs]
+            d = [(x, t) for x, t in d if np.isfinite(x)]
+            dabs = max(x for x, t in d); drel = max(x / t for x, t in d)
+            se = max(r[k]["step_err_max_deg"] for r in rs)
+            ok_g = 0; n_g = 0
+            for p in sel:
+                sc = {}
+                for w in wns:
+                    for z in zs:
+                        q = [G(p, w, z, ax)[k] for ax in axes]
+                        sc[w, z] = (max(r_["overshoot_pct"] for r_ in q), np.nanmean([r_["settle_s"] for r_ in q]))
+                c = [(v[1], w, z) for (w, z), v in sc.items() if v[0] <= OS_LIM]
+                ok_g += ((min(c)[1:] if c else (None, None)) == best[p]); n_g += 1
+            judge = dos <= G_DOS and (drel <= G_DST_REL or dabs <= G_DST_ABS) and se <= G_POS and ok_g == n_g
+            L.append(f"| {k} | {nm} | {dos:.2f} | {dabs*1e3:.1f} | {drel:.1%} | {se:.2e} | {ok_g}/{n_g} | {'○' if judge else '×'} |")
     open(os.path.join(a.out, "summary.md"), "w").write("\n".join(L) + "\n")
     print("\n".join(L))
     # 図
@@ -84,10 +112,10 @@ def main():
     ax_[0, 0].legend(); fig.suptitle("Simscape 真値: ペイロードとゲインによるステップ応答の変化（FF はペイロード込み）")
     fig.tight_layout(); fig.savefig(os.path.join(a.out, "payload_gain.png"), dpi=110); plt.close(fig)
     # モデル誤差 vs ペイロード
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, ax = plt.subplots(figsize=(11, 4.5))
     for k in PL[1:]:
         ax.semilogy(pls, [max(r[k]["err_axis_max_deg"] for r in R if r["payload"] == p) for p in pls], "o-", label=k)
-    ax.set_xlabel("ペイロード [kg]"); ax.set_ylabel("真値との位置誤差 最大 [deg]"); ax.grid(alpha=.3, which="both"); ax.legend()
+    ax.set_xlabel("ペイロード [kg]"); ax.set_ylabel("真値との位置誤差 最大 [deg]"); ax.grid(alpha=.3, which="both"); ax.legend(fontsize=8, loc="center left", bbox_to_anchor=(1.01, 0.5))
     ax.set_title("モデル別: 真値との差 vs ペイロード"); fig.tight_layout(); fig.savefig(os.path.join(a.out, "payload_model_err.png"), dpi=110)
 
 

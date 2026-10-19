@@ -38,5 +38,24 @@ classdef test_sa_payload < matlab.unittest.TestCase
             tc.verifyGreaterThan(abs(g1(2) - g0(2)), 0.1);
             tc.verifyEqual(g1(1), g0(1), 'AbsTol', 1e-9);       % J1 は鉛直軸まわり（重力トルクなし）
         end
+        function replicaScenarioSet(tc)
+            S0 = saScenarioSet(6, 'full');  S = saScenarioSetPayload(6, 'full', 2, [1 2 4 6 8]);
+            nb = nnz(~strcmp({S0.type},'ptp'));
+            tc.verifyEqual(numel(S), numel(S0) + 2*nb);
+            tc.verifyEqual(rmfield(S(1:numel(S0)), {'payload','replica'}), S0);                  % replica 0 は元のまま
+            tc.verifyTrue(all([S(1:numel(S0)).payload] == 0));
+            tc.verifyEqual(numel(unique({S.name})), numel(S));  tc.verifyEqual(numel(unique([S.seed])), numel(S));
+            R = S(numel(S0)+1:end);
+            tc.verifyTrue(all(ismember([R.payload], [1 2 4 6 8])));  tc.verifyFalse(any(strcmp({R.type},'ptp')));
+            ex = S(strcmp({S.type},'excitation'));
+            q0 = cell2mat(arrayfun(@(s) [s.q0, s.dq0], ex(:), 'UniformOutput', false));
+            tc.verifyEqual(size(unique(round(q0, 9), 'rows'), 1), numel(ex));                  % 初期状態が重複しない
+            for r = 1:2                                                                         % split は元のシナリオと同じ
+                for k = [1 40 100]
+                    o = S0(k);  c = S(strcmp({S.name}, sprintf('%s_r%d', o.name, r)));
+                    if ~isempty(c), tc.verifyEqual(c.split, o.split); end
+                end
+            end
+        end
     end
 end

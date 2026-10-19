@@ -42,7 +42,7 @@ for j = 1:numel(ia)
     k = find(ia(j) > off, 1, 'last');  i = ia(j) - off(k);
     s = sc(k);
     A(j,:) = (s.dq(i+1,:) - s.dq(i,:)) / dt;
-    P(j,:) = saFwdDyn(p, s.q(i,:)', s.dq(i,:)', s.tau(i,:)')';
+    P(j,:) = saFwdDyn(saApplyPayload(p, struct('mass', s.payload)), s.q(i,:)', s.dq(i,:)', s.tau(i,:)')';
 end
 r.metrics.accStd = std(A,0,1);
 r.metrics.residRatio = sqrt(mean((A - P).^2, 1)) ./ r.metrics.accStd;      % 残差の RMS / 目標の標準偏差

@@ -13,6 +13,7 @@ from sa_nsm.data import Dataset
 from sa_nsm.model import mlp
 
 DT = 1e-3
+PAYLOAD_SCALE = 8.0           # 入力 payload/8（最大 8 kg で 1）
 
 
 def targets(ds, sp, kind):
@@ -28,11 +29,12 @@ def targets(ds, sp, kind):
 
 class Net(nn.Module):
     def __init__(self, n_ax, x_mean, x_std, t_mean, t_std, width, depth, act, drop):
+        # 入力の次元は x_mean の長さ（4n。--payload のときは payload/8 を 1 列足して 4n+1）
         super().__init__()
         self.n_ax = n_ax
         for k, v in dict(x_mean=x_mean, x_std=x_std, t_mean=t_mean, t_std=t_std).items():
             self.register_buffer(k, torch.as_tensor(v, dtype=torch.float32))
-        layers, d = [], 4 * n_ax
+        layers, d = [], len(x_mean)
         for _ in range(depth):
             layers += [nn.Linear(d, width), act()] + ([nn.Dropout(drop)] if drop > 0 else [])
             d = width
@@ -70,6 +72,7 @@ def main():
     ap.add_argument("--bs", type=int, default=4096)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--wd", type=float, default=0.0)
+    ap.add_argument("--payload", action="store_true", help="入力に payload/8 を足す（issue #65）")
     ap.add_argument("--threads", type=int, default=2)
     a = ap.parse_args()
     torch.set_num_threads(a.threads); torch.manual_seed(a.seed); rng = np.random.RandomState(a.seed)
@@ -77,6 +80,8 @@ def main():
     n = ds.n_ax
     T = {sp: targets(ds, sp, a.target) for sp in ("train", "val", "test")}
     X = {sp: ds.part[sp]["X_spec"].astype(np.float32) for sp in T}
+    if a.payload:
+        X = {sp: np.concatenate([X[sp], (ds.payload(sp) / PAYLOAD_SCALE)[:, None].astype(np.float32)], 1) for sp in T}
     AT = {sp: ds.at_limit(sp) for sp in T}
     rows = np.where(~AT["train"])[0] if a.subset == "free" else np.arange(len(X["train"]))
     ref = ~AT["train"]                                   # 標準化は自由運動の統計（accel）／全行（std：4-2 と同じ）

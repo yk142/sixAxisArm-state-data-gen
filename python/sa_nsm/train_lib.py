@@ -11,8 +11,9 @@ from .model import MODELS, limit_features
 from .physics import Arm
 
 
-def prepare(ds, arm, cache_path=None, splits=("train", "val", "test", "benchmark"), dt=1e-3):
-    """split ごとのテンソルを返す。解析モデルの予測は倍精度で事前計算し、cache_path（npz）に保存・再利用する。"""
+def prepare(ds, arm, cache_path=None, splits=("train", "val", "test", "benchmark"), dt=1e-3, arm_for=None):
+    """split ごとのテンソルを返す。解析モデルの予測は倍精度で事前計算し、cache_path（npz）に保存・再利用する。
+    arm_for（ペイロード [kg] → 解析モデル）を渡すと、遷移ごとのペイロードに応じた解析ベースを使う（issue #65）。"""
     n = ds.n_ax
     sc = ds.scale
     cache = dict(np.load(cache_path)) if cache_path and os.path.exists(cache_path) else {}
@@ -24,7 +25,14 @@ def prepare(ds, arm, cache_path=None, splits=("train", "val", "test", "benchmark
         q, dq, tau = ds.q_dq_tau(sp)
         if f"{sp}_dq" not in cache:
             t = time.time()
-            a, b = analytic_delta(arm, q, dq, tau, dt)
+            if arm_for is None:
+                a, b = analytic_delta(arm, q, dq, tau, dt)
+            else:
+                pl = ds.payload(sp)
+                a, b = np.zeros_like(q), np.zeros_like(q)
+                for m in np.unique(pl):
+                    i = pl == m
+                    a[i], b[i] = analytic_delta(arm_for(float(m)), q[i], dq[i], tau[i], dt)
             cache[f"{sp}_dq"], cache[f"{sp}_ddq"] = a, b
             print(f"解析モデルの事前計算 {sp}: {len(q):,} 遷移 {time.time() - t:.0f} s", flush=True)
             if cache_path:
