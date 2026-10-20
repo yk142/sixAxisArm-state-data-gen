@@ -74,6 +74,8 @@ def main():
     ap.add_argument("--wd", type=float, default=0.0)
     ap.add_argument("--payload", action="store_true", help="入力に payload/8 を足す（issue #65）")
     ap.add_argument("--threads", type=int, default=2)
+    ap.add_argument("--hi-tau", type=float, default=0.0, help="高トルク行のオーバーサンプリング係数 W（issue #67）。行の抽出確率 ∝ 1 + W·max_j min(|τ_j|/(thr·TAU_MAX_j), 1)。0 で無効（従来どおり全行を 1 回ずつ）")
+    ap.add_argument("--hi-tau-thr", type=float, default=0.3, help="高トルクの閾値（TAU_MAX に対する比）")
     a = ap.parse_args()
     torch.set_num_threads(a.threads); torch.manual_seed(a.seed); rng = np.random.RandomState(a.seed)
     ds = Dataset(a.h5, splits=("train", "val", "test"))
@@ -105,10 +107,15 @@ def main():
         else:
             d_dq = p[:, n:] - T["val"][vfree][:, n:]
         return np.sqrt(np.mean(d_dq ** 2, 0))
+    prob = None
+    if a.hi_tau > 0:
+        s_hi = np.minimum(np.abs(X["train"][rows][:, 3 * n:4 * n]) / a.hi_tau_thr, 1.0).max(1)       # X_spec の末尾 n 列（payload 列を足していても 3n:4n は tau/TAU_MAX）
+        prob = 1.0 + a.hi_tau * s_hi; prob /= prob.sum()
+        print(f"[{a.tag}] 高トルク オーバーサンプリング W={a.hi_tau}: 実効の高トルク行（s_hi=1）の割合 {(prob * (s_hi >= 1)).sum() * 100:.2f}%（元 {(s_hi >= 1).mean() * 100:.3f}%）", flush=True)
     best, best_state, hist = np.inf, None, []
     for ep in range(a.epochs):
         model.train(); t0 = time.time(); tot = 0.0
-        perm = rows[rng.permutation(N)]
+        perm = rows[rng.permutation(N)] if prob is None else rows[rng.choice(N, N, p=prob)]
         for s in range(0, N, a.bs):
             j = perm[s:s + a.bs]
             opt.zero_grad()

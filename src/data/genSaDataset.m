@@ -11,6 +11,7 @@ function ds = genSaDataset(opts)
 %     opts.save      データセットを .mat に保存するか（既定 true）
 %     opts.replicas  ペイロードを変えた複製の組数（既定 0。issue #65。saScenarioSetPayload。保存名は sa_dataset_<preset>pl<nAx>.mat）
 %     opts.payloadGrid  複製に割り当てるペイロード [kg]（既定 [1 2 4 6 8]）
+%     opts.pulse     [n1 nOther]: 高トルクのパルス励振の本数（軸 1 を n1 本、他軸を各 nOther 本。既定 [0 0]。issue #67。saScenarioSetPulse。保存名に pu が付く）
 %   戻り値 ds: 全シナリオのキャッシュが揃っていれば組み立てたデータセット、無ければ []。
 %
 %   シナリオ単位で 8 kHz 生データを **double** で保存するので、中断しても続きから再開できる
@@ -19,7 +20,7 @@ function ds = genSaDataset(opts)
 %   組み立ては saAssembleDataset（1 kHz 変換、リミット拘束フラグ、train のみの正規化統計、マニフェスト）。
 c = sa_config();
 if nargin < 1, opts = struct(); end
-def = struct('nAx',3,'preset','full','names',{{}},'outDir',c.dataDir,'shard',[1 1],'maxScen',Inf,'cacheOnly',false,'save',true,'replicas',0,'payloadGrid',[1 2 4 6 8]);
+def = struct('nAx',3,'preset','full','names',{{}},'outDir',c.dataDir,'shard',[1 1],'maxScen',Inf,'cacheOnly',false,'save',true,'replicas',0,'payloadGrid',[1 2 4 6 8],'pulse',[0 0]);
 f = fieldnames(def);
 for i = 1:numel(f)
     if ~isfield(opts,f{i}) || (isempty(opts.(f{i})) && ~strcmp(f{i},'names')), opts.(f{i}) = def.(f{i}); end
@@ -27,6 +28,10 @@ end
 nAx = opts.nAx;
 S = saScenarioSetPayload(nAx, opts.preset, opts.replicas, opts.payloadGrid);
 tagPl = '';  if opts.replicas > 0, tagPl = 'pl'; end
+if any(opts.pulse > 0)
+    S = [S, saScenarioSetPulse(nAx, opts.pulse(1), opts.pulse(2), [0 opts.payloadGrid])];
+    tagPl = [tagPl 'pu'];
+end
 if ~isempty(opts.names)
     [tf, loc] = ismember(opts.names, {S.name});
     assert(all(tf), 'genSaDataset:names', '未知のシナリオ名があります');
