@@ -28,6 +28,18 @@ switch s.type
                 for j = 1:nAx
                     u(:,j) = saSignal('chirp', tVec, amp(j), struct('f0',0.1,'f1',s.fMax,'phiDeg',360*rand(rs)));
                 end
+            case 'pulse'      % 高トルク領域: 静止状態から目標軸へ ±(0.3〜1)·tauPeak のパルスを 3 回（issue #67）。他軸は重力保持＋微小 BLN
+                a = s.axis;
+                u = repmat(gravityTorque(s.q0, nAx, plo), numel(tVec), 1);
+                for j = 1:nAx
+                    u(:,j) = u(:,j) + saSignal('bln', tVec, amp(j), struct('fMax',s.fMax,'seed',s.seed + 101*j));
+                end
+                sg = 1 - 2*(rand(rs) < 0.5);
+                for m = 1:3
+                    tOn = 0.1 + 0.4*(m-1);  tw = 0.02 + 0.13*rand(rs);  fr = 0.3 + 0.7*rand(rs);
+                    on = tVec >= tOn & tVec < tOn + tw;
+                    u(on,a) = u(on,a) + sg*(-1)^(m-1)*fr*sp.tauPeak(a);
+                end
             case 'micro'      % 摩擦・粘性域: 初期姿勢の重力保持トルクのまわりに微小トルク
                 u = repmat(gravityTorque(s.q0, nAx, plo), numel(tVec), 1);
                 for j = 1:nAx

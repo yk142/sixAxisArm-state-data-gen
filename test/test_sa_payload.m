@@ -57,5 +57,20 @@ classdef test_sa_payload < matlab.unittest.TestCase
                 end
             end
         end
+
+        function pulseScenarioSet(tc)
+            % 高トルクのパルス励振（issue #67）
+            S = saScenarioSetPulse(6, 5, 2, [0 1 2 4 6 8]);
+            tc.verifyEqual(numel(S), 5 + 5*2);
+            tc.verifyEqual(sum([S.axis] == 1), 5);  tc.verifyEqual(sum([S.axis] == 4), 2);
+            tc.verifyEqual(numel(unique({S.name})), numel(S));  tc.verifyEqual(numel(unique([S.seed])), numel(S));
+            tc.verifyTrue(all(strcmp({S.pattern}, 'pulse')) && all(strcmp({S.type}, 'excitation')));
+            tc.verifyTrue(all(ismember([S.payload], [0 1 2 4 6 8])));
+            tc.verifyTrue(all(ismember({S.split}, {'train','val','test'})));
+            % saScenarioSetPayload の出力と連結できる（フィールドが一致）
+            B = saScenarioSetPayload(6, 'small', 0, 1);
+            tc.verifyEqual(fieldnames(B), fieldnames(S));
+            tc.verifyEqual(numel(unique([[B.seed] [S.seed]])), numel(B) + numel(S));
+        end
     end
 end
