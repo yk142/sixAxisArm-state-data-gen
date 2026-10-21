@@ -8,5 +8,7 @@ for i = 1:numel(q0)
     set_param(sprintf('%s/joint%d',mdl,i), ...
         'PositionTargetSpecify','on', 'PositionTargetValue',sprintf('%.12g',q0(i)), 'PositionTargetValueUnits','rad', ...
         'VelocityTargetSpecify','on', 'VelocityTargetValue',sprintf('%.12g',dq0(i)), 'VelocityTargetValueUnits','rad/s');
+    sn = sprintf('%s/motorSns_%d',mdl,i);          % 関節弾性つき: モータ側センサの角度は q0 から始める（issue #71）
+    if getSimulinkBlockHandle(sn) > 0, set_param(sn,'offset',sprintf('%.12g',q0(i)),'offset_unit','rad'); end
 end
 end
