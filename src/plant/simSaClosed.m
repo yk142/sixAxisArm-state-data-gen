@@ -2,7 +2,7 @@ function out = simSaClosed(mdl, tVec, REF, tauDist, q0, dq0)
 %SIMSACLOSED 閉ループモデルを参照軌道で実行する。
 %   out = SIMSACLOSED(mdl, tVec, REF, tauDist, q0, dq0)
 %     REF [n x (1+3·nAx)] = saPtpReference の出力、tauDist [n x nAx] または []（外乱なし）、q0, dq0 [nAx x 1]
-%   out: .t, .q, .dq, .tau（飽和後の実印加トルク）、.qRef, .dqRef（t 上に補間した参照）
+%   out: .t, .q, .dq, .tau（飽和後の実印加トルク）、弾性つきなら .qm, .dqm（モータ側）、.qRef, .dqRef（t 上に補間した参照）
 nAx = numel(q0);  tVec = tVec(:);
 if nargin < 4 || isempty(tauDist), tauDist = zeros(numel(tVec), nAx); end
 if nargin < 6 || isempty(dq0), dq0 = zeros(nAx,1); end
@@ -21,6 +21,10 @@ out.t  = o.yout.getElement(1).Values.Time;
 out.q  = o.yout.getElement(1).Values.Data;
 out.dq = o.yout.getElement(2).Values.Data;
 out.tau = o.yout.getElement(3).Values.Data;
+if o.yout.numElements >= 5      % 関節弾性つき（issue #71）: モータ側（リンク側換算）の角度・角速度
+    out.qm  = o.yout.getElement(4).Values.Data;
+    out.dqm = o.yout.getElement(5).Values.Data;
+end
 out.qRef = interp1(tVec, REF(:,2:1+nAx), out.t);
 out.dqRef = interp1(tVec, REF(:,2+nAx:1+2*nAx), out.t);
 end

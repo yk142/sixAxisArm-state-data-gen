@@ -4,6 +4,7 @@ function mdl = buildSaClosedLoop(nAx, opts)
 %   mdl = BUILDSACLOSEDLOOP(nAx, opts)   opts は buildSaPlant のものに加え:
 %       opts.modelName  既定 'sa_closed<nAx>'
 %       opts.wn         PD の固有角周波数 [rad/s]（スカラまたは [1 x nAx]、既定 60）、opts.zeta 減衰比（既定 1）
+%   opts.elastic（issue #71）を渡すと関節弾性つき。PD のフィードバックは el.fb（既定 'motor' = モータ側）。Outport 4, 5 = 'qm', 'dqm'（モータ側）
 %   I/F:
 %     Inport 'ref' [4·nAx] = [q_ref, dq_ref, tau_ff, tau_dist]
 %     Outport 'q', 'dq', 'tau'（飽和後の実印加トルク）
@@ -32,11 +33,15 @@ add_block('simulink/Discontinuities/Saturation',[mdl '/tauSat'], ...
     'UpperLimit',mat2str(sp.tauPeak,12),'LowerLimit',mat2str(-sp.tauPeak,12));
 add_block('simulink/Sinks/Out1',[mdl '/tau']);  set_param([mdl '/tau'],'Port','3');
 add_line(mdl,'ref/1','refDemux/1');
-add_line(mdl,'refDemux/1','eq/1');   add_line(mdl,'q_mux/1','eq/2');
-add_line(mdl,'refDemux/2','edq/1');  add_line(mdl,'dq_mux/1','edq/2');
+qSrc = 'q_mux';  dqSrc = 'dq_mux';
+elastic = isfield(opts,'elastic') && ~isempty(opts.elastic);
+if elastic && strcmp(saElasticParams(nAx, opts.elastic).fb, 'motor'), qSrc = 'qm_mux';  dqSrc = 'dqm_mux'; end   % 実機のエンコーダはモータ側（issue #71）
+add_line(mdl,'refDemux/1','eq/1');   add_line(mdl,[qSrc '/1'],'eq/2');
+add_line(mdl,'refDemux/2','edq/1');  add_line(mdl,[dqSrc '/1'],'edq/2');
 add_line(mdl,'eq/1','Kp/1');         add_line(mdl,'edq/1','Kd/1');
 add_line(mdl,'Kp/1','tauSum/1');     add_line(mdl,'Kd/1','tauSum/2');
 add_line(mdl,'refDemux/3','tauSum/3'); add_line(mdl,'refDemux/4','tauSum/4');
 add_line(mdl,'tauSum/1','tauSat/1'); add_line(mdl,'tauSat/1','tau_demux/1'); add_line(mdl,'tauSat/1','tau/1');
+if elastic, set_param([mdl '/qm'],'Port','4');  set_param([mdl '/dqm'],'Port','5'); end   % 1..3 = q, dq, tau
 save_system(mdl, get_param(mdl,'FileName'));
 end
