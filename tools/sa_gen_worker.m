@@ -1,4 +1,4 @@
-function sa_gen_worker(nAx, preset, shardI, shardN, replicas, pulse1, pulseOther)
+function sa_gen_worker(nAx, preset, shardI, shardN, replicas, pulse1, pulseOther, elastic)
 %SA_GEN_WORKER データ生成を分担する作業プロセス用のエントリポイント。
 %   別プロセスから実行: matlab -batch "addpath('tools'); sa_gen_worker(3, 'full', 1, 3)"
 %   shardI/shardN で担当を分ける（Parallel Computing Toolbox が使えないための代替）。
@@ -16,5 +16,7 @@ if nargin < 6, pulse1 = 0; end
 if nargin < 7, pulseOther = 0; end
 if ischar(pulse1), pulse1 = str2double(pulse1); end
 if ischar(pulseOther), pulseOther = str2double(pulseOther); end
-genSaDataset(struct('nAx',nAx,'preset',preset,'shard',[shardI shardN],'cacheOnly',true,'replicas',replicas,'pulse',[pulse1 pulseOther]));
+if nargin < 8, elastic = []; end                 % 1 を渡すと既定の関節弾性（f = 20 Hz。issue #73）
+if isequal(elastic, 0) || isequal(elastic, '0'), elastic = []; elseif isequal(elastic, 1) || isequal(elastic, '1'), elastic = struct(); end
+genSaDataset(struct('nAx',nAx,'preset',preset,'shard',[shardI shardN],'cacheOnly',true,'replicas',replicas,'pulse',[pulse1 pulseOther],'elastic',elastic));
 end

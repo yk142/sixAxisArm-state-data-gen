@@ -3,7 +3,7 @@ function mdl = buildSaExcitation(nAx, opts)
 %   mdl = BUILDSAEXCITATION(nAx)         nAx = 3 または 6。data/models/sa_excite<nAx>.slx に保存
 %   mdl = BUILDSAEXCITATION(nAx, opts)   opts は buildSaPlant のものに加え:
 %       opts.barrierWn  バリアの固有角周波数 [rad/s]（既定 60）
-%   I/F:  Inport 'tauEx' [nAx] → Outport 'q', 'dq', 'tau'（飽和後の実印加トルク）
+%   I/F:  Inport 'tauEx' [nAx] → Outport 'q', 'dq', 'tau'（飽和後の実印加トルク）、opts.elastic 指定時は 4, 5 = 'qm', 'dqm'（issue #73）
 %
 %   ソフトバリア（J2 版・親資産 buildC8Excitation と同じ考え方、軸ごと）:
 %       τ = sat( τ_ex − Kp_bar·deadzone(q; qSoftMin, qSoftMax) − Kd_bar·deadzone(dq; ±dqSoft) )
@@ -32,6 +32,8 @@ add_block('simulink/Math Operations/Gain',[mdl '/KdBar'],'Gain',mat2str(-max(2*s
 add_block('simulink/Math Operations/Sum',[mdl '/tauSum'],'Inputs','+++');
 add_block('simulink/Discontinuities/Saturation',[mdl '/tauSat'], ...
     'UpperLimit',mat2str(sp.tauPeak,12),'LowerLimit',mat2str(-sp.tauPeak,12));
+elastic = isfield(opts,'elastic') && ~isempty(opts.elastic);
+if elastic, set_param([mdl '/qm'],'Port','4');  set_param([mdl '/dqm'],'Port','5'); end   % 関節弾性つき（issue #73）: 1..3 = q, dq, tau
 add_block('simulink/Sinks/Out1',[mdl '/tau']);  set_param([mdl '/tau'],'Port','3');
 add_line(mdl,'q_mux/1','qDead/1');   add_line(mdl,'qDead/1','KpBar/1');
 add_line(mdl,'dq_mux/1','dqDead/1'); add_line(mdl,'dqDead/1','KdBar/1');

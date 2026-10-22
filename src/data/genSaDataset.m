@@ -12,6 +12,7 @@ function ds = genSaDataset(opts)
 %     opts.replicas  ペイロードを変えた複製の組数（既定 0。issue #65。saScenarioSetPayload。保存名は sa_dataset_<preset>pl<nAx>.mat）
 %     opts.payloadGrid  複製に割り当てるペイロード [kg]（既定 [1 2 4 6 8]）
 %     opts.pulse     [n1 nOther]: 高トルクのパルス励振の本数（軸 1 を n1 本、他軸を各 nOther 本。既定 [0 0]。issue #67。saScenarioSetPulse。保存名に pu が付く）
+%     opts.elastic   関節弾性のパラメータ（saElasticParams の e。空なら剛体。issue #73）。キャッシュ名・保存名に el が付く
 %   戻り値 ds: 全シナリオのキャッシュが揃っていれば組み立てたデータセット、無ければ []。
 %
 %   シナリオ単位で 8 kHz 生データを **double** で保存するので、中断しても続きから再開できる
@@ -20,10 +21,10 @@ function ds = genSaDataset(opts)
 %   組み立ては saAssembleDataset（1 kHz 変換、リミット拘束フラグ、train のみの正規化統計、マニフェスト）。
 c = sa_config();
 if nargin < 1, opts = struct(); end
-def = struct('nAx',3,'preset','full','names',{{}},'outDir',c.dataDir,'shard',[1 1],'maxScen',Inf,'cacheOnly',false,'save',true,'replicas',0,'payloadGrid',[1 2 4 6 8],'pulse',[0 0]);
+def = struct('nAx',3,'preset','full','names',{{}},'outDir',c.dataDir,'shard',[1 1],'maxScen',Inf,'cacheOnly',false,'save',true,'replicas',0,'payloadGrid',[1 2 4 6 8],'pulse',[0 0],'elastic',[]);
 f = fieldnames(def);
 for i = 1:numel(f)
-    if ~isfield(opts,f{i}) || (isempty(opts.(f{i})) && ~strcmp(f{i},'names')), opts.(f{i}) = def.(f{i}); end
+    if ~isfield(opts,f{i}) || (isempty(opts.(f{i})) && ~any(strcmp(f{i},{'names','elastic'}))), opts.(f{i}) = def.(f{i}); end
 end
 nAx = opts.nAx;
 S = saScenarioSetPayload(nAx, opts.preset, opts.replicas, opts.payloadGrid);
@@ -39,7 +40,8 @@ if ~isempty(opts.names)
 end
 cacheDir = fullfile(opts.outDir,'cache');
 if ~isfolder(cacheDir), mkdir(cacheDir); end
-cacheFn = @(s) fullfile(cacheDir, sprintf('%s%d_%s.mat', opts.preset, nAx, s.name));
+tagEl = '';  if ~isempty(opts.elastic), tagEl = 'el'; tagPl = [tagPl 'el']; end
+cacheFn = @(s) fullfile(cacheDir, sprintf('%s%s%d_%s.mat', opts.preset, tagEl, nAx, s.name));
 
 % ---- 1. 未生成のシナリオを（自分の分担ぶんだけ）実行 ----
 todo = find(arrayfun(@(s) ~isfile(cacheFn(s)), S));
@@ -57,10 +59,10 @@ if ~isempty(mine)
         if nNew >= opts.maxScen, break; end
         s = S(k);  t0 = tic;
         key = sprintf('p%g', s.payload);  key(key=='.') = '_';
-        if ~isfield(models, key), models.(key) = buildModels(nAx, workDir, sprintf('%s_%s', tag, key), s.payload); end
+        if ~isfield(models, key), models.(key) = buildModels(nAx, workDir, sprintf('%s_%s', tag, key), s.payload, opts.elastic); end
         raw = runSaScenario(s, models.(key));
         e = struct('name',s.name,'seed',s.seed,'q',raw.q,'dq',raw.dq,'tau',raw.tau, ...
-            'qref',raw.qref,'dqref',raw.dqref,'q0',raw.q0,'dq0',raw.dq0,'contact8k',raw.contact,'fs',c.fsSim, ...
+            'qref',raw.qref,'dqref',raw.dqref,'qm',getf(raw,'qm'),'dqm',getf(raw,'dqm'),'q0',raw.q0,'dq0',raw.dq0,'contact8k',raw.contact,'fs',c.fsSim, ...
             'payload',s.payload,'wall',toc(t0),'repo',repoState,'matlab',version); %#ok<NASGU>
         tmp = [cacheFn(s) '.tmp'];  save(tmp, 'e', '-mat');  movefile(tmp, cacheFn(s));   % 書き込み途中のファイルを残さない
         nNew = nNew + 1;
@@ -90,12 +92,19 @@ C = load(fn);  e = C.e;
 if ~isfield(e,'payload'), e.payload = 0; end
 end
 
-function m = buildModels(nAx, workDir, tag, payload)
+function v = getf(s, f)
+v = [];  if isfield(s,f), v = s.(f); end
+end
+
+function m = buildModels(nAx, workDir, tag, payload, elastic)
 % ペイロードを反映した励振・閉ループのモデル（モデル名はプロセス・ペイロードごとに一意）
 nE = sprintf('sa_excite%d_gen%s', nAx, tag);  nC = sprintf('sa_closed%d_gen%s', nAx, tag);
 po = struct('mass', payload);
-m.excite = buildSaExcitation(nAx, struct('modelName',nE,'slxPath',fullfile(workDir,[nE '.slx']),'payload',po));
-m.closed = buildSaClosedLoop(nAx, struct('modelName',nC,'slxPath',fullfile(workDir,[nC '.slx']),'payload',po));
+oe = struct('modelName',nE,'slxPath',fullfile(workDir,[nE '.slx']),'payload',po);
+oc = struct('modelName',nC,'slxPath',fullfile(workDir,[nC '.slx']),'payload',po);
+if ~isempty(elastic), oe.elastic = elastic;  oc.elastic = elastic; end
+m.excite = buildSaExcitation(nAx, oe);
+m.closed = buildSaClosedLoop(nAx, oc);
 end
 
 function cleanupWork(oldDir, workDir)
