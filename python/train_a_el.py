@@ -69,6 +69,7 @@ def main():
     ap.add_argument("--payload", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--theta-max", type=float, default=0.06, help="学習・選択に使う行の上限: 全軸で |qm − q| < この値 [rad]。励振（チリープ等）が共振を叩くと θ が 0.7 rad に達するが、閉ループ（保持・ステップ）の p99 は 0.005 rad 程度で実運転の範囲外。0 で無効")
+    ap.add_argument("--noise-r", type=float, default=0.0, help="入力状態 (q, dq, θ, dqm) へ加えるガウスノイズの大きさ。σ = r × 各状態の 1 ステップ増分の標準偏差（軸ごと）。0 でノイズなし（issue #75）")
     a = ap.parse_args()
     torch.set_num_threads(a.threads); torch.manual_seed(a.seed); rng = np.random.RandomState(a.seed)
     ds = Dataset(a.h5, splits=("train", "val", "test"))
@@ -89,6 +90,28 @@ def main():
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=a.wd)
     N = len(rows); spe = (N + a.bs - 1) // a.bs; steps = a.epochs * spe; warm, lr_end = 200, 1e-5
     sch = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: (s + 1) / warm if s < warm else lr_end / a.lr + 0.5 * (1 - lr_end / a.lr) * (1 + np.cos(np.pi * (s - warm) / max(1, steps - warm))))
+    # 入力ノイズの σ（物理単位）。増分 Δq, Δdq, Δθ, Δdqm は学習行（θ フィルタ内・自由運動）の標準偏差
+    sig = None
+    if a.noise_r > 0:
+        q_, dq_, _ = ds.q_dq_tau("train"); qm_, dqm_ = ds.motor("train")
+        d_q, d_dq = ds.delta("train"); d_qm, d_dqm = ds.motor_delta("train")
+        sd = lambda v: v[rows].std(0)
+        sig = a.noise_r * np.stack([sd(d_q), sd(d_dq), sd(d_qm - d_q), sd(d_dqm)])   # [4, n]
+        print(f"[{a.tag}] ノイズ σ (r={a.noise_r}) 軸平均 q {sig[0].mean():.3g} rad, dq {sig[1].mean():.3g} rad/s, θ {sig[2].mean():.3g} rad, dqm {sig[3].mean():.3g} rad/s", flush=True)
+        sig_t = torch.as_tensor(sig, dtype=torch.float32)
+        DQ_MAX = torch.as_tensor(np.asarray(ds.scale["DQ_MAX"]), dtype=torch.float32)
+
+    def add_noise(xb):
+        """特徴量 [sin q, cos q, dq/DQ, θ/θs, dqm/DQ, tau, (payload)] の状態列へノイズを加える。"""
+        xb = xb.clone(); B = xb.shape[0]
+        e = torch.randn(4, B, n) * sig_t[:, None, :]
+        s_, c_ = xb[:, :n].clone(), xb[:, n:2 * n].clone(); cd, sd_ = torch.cos(e[0]), torch.sin(e[0])
+        xb[:, :n] = s_ * cd + c_ * sd_; xb[:, n:2 * n] = c_ * cd - s_ * sd_
+        xb[:, 2 * n:3 * n] += e[1] / DQ_MAX
+        xb[:, 3 * n:4 * n] += e[2] / THETA_SCALE
+        xb[:, 4 * n:5 * n] += e[3] / DQ_MAX
+        return xb
+
     Xt = torch.from_numpy(X["train"]); Zt = torch.from_numpy(((T["train"] - t_mean) / t_std).astype(np.float32))
     vfree = ~AT["val"] & inr["val"]
 
@@ -106,7 +129,8 @@ def main():
         for s in range(0, N, a.bs):
             j = perm[s:s + a.bs]
             opt.zero_grad()
-            loss = ((model(Xt[j]) - Zt[j]) ** 2).mean()
+            xb = add_noise(Xt[j]) if sig is not None else Xt[j]
+            loss = ((model(xb) - Zt[j]) ** 2).mean()
             loss.backward(); opt.step(); sch.step()
             tot += loss.item() * len(j)
         rm, vm = val_metric()
@@ -117,7 +141,7 @@ def main():
     model.load_state_dict(best_state)
     out = os.path.join(a.out, f"{a.tag}_s{a.seed}"); os.makedirs(out, exist_ok=True)
     torch.save(model.state_dict(), f"{out}/model.pt")
-    cfg = vars(a).copy(); cfg.update(n_ax=n, d_in=int(X["train"].shape[1]))
+    cfg = vars(a).copy(); cfg.update(noise_sigma=(sig.tolist() if sig is not None else None), n_ax=n, d_in=int(X["train"].shape[1]))
     json.dump(cfg, open(f"{out}/config.json", "w")); json.dump(hist, open(f"{out}/history.json", "w"))
     res = {}
     for sp in ("val", "test"):
