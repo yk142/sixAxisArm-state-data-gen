@@ -81,9 +81,12 @@ def closed_loop(pred, scen, ctl):
 
 
 @torch.no_grad()
-def closed_loop_el(pred, scen, ctl):
+def closed_loop_el(pred, scen, ctl, iters=0):
     """モータ側の状態を持つプラント `pred.step(q, dq, qm, dqm, tau)` の閉ループ実行（issue #73）。PD は実機と同じくモータ側 (qm, dqm) でフィードバックする。
     区間中点の推定は closed_loop と同じ（直前の区間の平均加速度で外挿。モータ側の加速度で qm, dqm を外挿する）。
+    iters > 0（issue #77）: 区間の平均トルク τ = sat(ū − Kp·qm_平均 − Kd·dqm_平均) を、区間の始点・終点の平均（台形）で整合させる反復。
+    モータ慣性が小さく Kd·h/Jm が大きい（高ゲインの軸 1・2）と、中点の外挿推定では ΔOS が 30 pt ずれる。pred.Jm があれば、
+    終点がトルクに依存する分の傾き（Kd·h/(2Jm) + Kp·h²/(4Jm)）で緩和して 1〜2 回で収束させる。
     返り値: q, dq, qm, dqm [B, K+1, n]。"""
     B, n = len(scen), scen[0].q.shape[1]
     K = max(s.K for s in scen)
@@ -100,6 +103,13 @@ def closed_loop_el(pred, scen, ctl):
         dqm_mid = dqm + am_prev * h / 2
         tau = torch.minimum(torch.maximum(U[:, k] - Kp * qm_mid - Kd * dqm_mid, -peak), peak)
         q1, dq1, qm1, dqm1 = pred.step(q, dq, qm, dqm, tau)
+        if iters:
+            Jm = getattr(pred, "Jm", None)
+            gp = -(Kd * h / (2 * Jm) + Kp * h ** 2 / (4 * Jm)) if Jm is not None else 0.0
+            for _ in range(iters):
+                F = torch.minimum(torch.maximum(U[:, k] - Kp * (qm + qm1) / 2 - Kd * (dqm + dqm1) / 2, -peak), peak)
+                tau = (F - gp * tau) / (1 - gp)
+                q1, dq1, qm1, dqm1 = pred.step(q, dq, qm, dqm, tau)
         am_prev = (dqm1 - dqm) / h
         q, dq, qm, dqm = q1, dq1, qm1, dqm1
         for o, v in zip(out, (q, dq, qm, dqm)): o.append(v)

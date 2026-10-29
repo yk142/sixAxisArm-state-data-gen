@@ -34,11 +34,14 @@ class ElPlant:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--models", nargs="+", required=True)
+    ap.add_argument("--models", nargs="*", default=[])
+    ap.add_argument("--twomass", type=int, default=0, help="2 慣性の解析モデル（issue #77）を追加する。値はサブステップ数（0 で無効、推奨 8）")
     ap.add_argument("--data", default="data/export/payload_eval6_el20.h5")
     ap.add_argument("--h5", default="data/export/sa_flat_fullplpu6el.h5", help="スケール（DQ_MAX, TAU_MAX）を読む学習データ")
     ap.add_argument("--out", required=True)
     ap.add_argument("--shard", default="0/1")
+    ap.add_argument("--iters", type=int, default=0, help="closed_loop_el の平均トルク整合の反復回数（issue #77）")
+    ap.add_argument("--wn-min", type=float, default=0, help="この wn 以上のグループだけ評価する")
     ap.add_argument("--threads", type=int, default=4)
     a = ap.parse_args()
     si, sk = (int(x) for x in a.shard.split("/"))
@@ -46,11 +49,15 @@ def main():
     with h5py.File(a.h5, "r") as f:
         dq_max, tau_max = f["scale/DQ_MAX"][:].ravel(), f["scale/TAU_MAX"][:].ravel()
     plants = {f"A_el（{os.path.basename(p)}）": ElPlant(p, dq_max, tau_max) for p in a.models}
+    if a.twomass:
+        from sa_nsm.twomass import TwoMass
+        plants[f"2慣性解析（sub{a.twomass}）"] = TwoMass("data/export/c8_params.json", "data/export/elastic20.json", substeps=a.twomass)
     os.makedirs(a.out, exist_ok=True)
     res = []
     with h5py.File(a.data, "r") as f:
         peak = f["controller/tauPeak"][:].ravel()
         groups = sorted({k.rsplit("_j", 1)[0] for k in f if k != "controller"})
+        groups = [g for g in groups if float(np.ravel(f[g + "_j1"].attrs["wn"])[0]) >= a.wn_min]
         for gi, gk in enumerate(groups):
             if gi % sk != si: continue
             m = int(f[gk + "_j1"].attrs["payload"])
@@ -63,7 +70,7 @@ def main():
             q_by = {"Simscape": np.stack([s.q for s in sc])}
             for pn, pl in plants.items():
                 pl.payload = float(m)
-                q_by[pn] = closed_loop_el(pl, sc, ctl)[0]
+                q_by[pn] = closed_loop_el(pl, sc, ctl, iters=a.iters)[0]
             for ax in range(len(peak)):
                 row = {"payload": m, "wn": wn, "zeta": zeta, "axis": ax + 1}
                 for pn, q in q_by.items():
