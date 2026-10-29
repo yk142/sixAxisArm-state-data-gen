@@ -55,3 +55,17 @@ class Dataset:
         """遷移ごとの手先ペイロード [kg]（HDF5 に無ければ 0）。"""
         d = self.part[split]
         return d["payload"].astype(np.float64) if "payload" in d else np.zeros(len(d["X"]))
+
+    def has_motor(self, split="train"):
+        """関節弾性つきデータ（issue #73）なら True。Xm = [qm dqm]、Ym = [Δqm Δdqm]。"""
+        return "Xm" in self.part[split]
+
+    def motor(self, split):
+        n = self.n_ax
+        X = self.part[split]["Xm"].astype(np.float64)
+        return X[:, :n], X[:, n:]
+
+    def motor_delta(self, split):
+        n = self.n_ax
+        Y = self.part[split]["Ym"].astype(np.float64)
+        return Y[:, :n], Y[:, n:]

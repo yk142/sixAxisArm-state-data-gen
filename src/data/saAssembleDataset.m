@@ -11,7 +11,7 @@ if ~isfield(opts,'preset'), opts.preset = ''; end
 c = sa_config();  sp = saParams(nAx);  tol = deg2rad(0.1);
 genRepo = {};  genMatlab = {};  wall = zeros(numel(S),1);
 scen = repmat(struct('name','','pattern','','type','','phase',[],'split','','seed',0,'q',[],'dq',[], ...
-    'tau',[],'tauInst',[],'qref',[],'dqref',[],'atLimit',[],'contact8k',0,'nTransition',0,'payload',0), numel(S), 1);
+    'tau',[],'tauInst',[],'qref',[],'dqref',[],'atLimit',[],'contact8k',0,'nTransition',0,'payload',0,'qm',[],'dqm',[]), numel(S), 1);
 for k = 1:numel(S)
     s = S(k);  e = loadFn(s);
     assert(e.seed == s.seed && strcmp(e.name, s.name), 'saAssembleDataset:cache', ...
@@ -25,7 +25,8 @@ for k = 1:numel(S)
     atLimit = lim(1:end-1) | lim(2:end);
     scen(k) = struct('name',s.name,'pattern',s.pattern,'type',s.type,'phase',s.phase,'split',s.split,'seed',s.seed, ...
         'q',D.q,'dq',D.dq,'tau',D.tau,'tauInst',D.tauInst,'qref',D.qref,'dqref',D.dqref, ...
-        'atLimit',atLimit,'contact8k',e.contact8k,'nTransition',size(D.tau,1),'payload',pl);
+        'atLimit',atLimit,'contact8k',e.contact8k,'nTransition',size(D.tau,1),'payload',pl,'qm',[],'dqm',[]);
+    if isfield(D,'qm'), scen(k).qm = D.qm;  scen(k).dqm = D.dqm; end      % 関節弾性つき（issue #73）
 end
 % ---- 正規化統計: train の全遷移のみ（val / test / benchmark のリーク防止）----
 isTrain = strcmp({scen.split},'train');

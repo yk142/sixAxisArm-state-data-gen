@@ -4,7 +4,7 @@ function raw = runSaScenario(s, models)
 %     s       saScenarioSet の要素
 %     models  .excite（励振モデル名）、.closed（閉ループモデル名）。ロード済みであること
 %   raw: .t .q .dq .tau（8 kHz、実印加トルク）、.qref .dqref（閉ループのみ、無ければ空）、
-%        .q0 .dq0（実際の初期状態）、.contact（リミット拘束 = 可動範囲の端から 0.1° 以内または外側の点の割合）
+%        .qm .dqm（関節弾性つきのみ。モータ側）、.q0 .dq0（実際の初期状態）、.contact（リミット拘束 = 可動範囲の端から 0.1° 以内または外側の点の割合）
 %   type ごとの内容:
 %     excitation  開ループ励振＋ソフトバリア＋飽和。軸ごとに独立な信号（pattern で信号が変わる）
 %     hold        PD＋FF で代表姿勢まわりの滑らかな参照に追従し、軸ごとに独立な BLN 外乱トルクを加える
@@ -86,6 +86,7 @@ switch s.type
         error('runSaScenario:type', '未知の type: %s', s.type);
 end
 raw.t = o.t;  raw.q = o.q;  raw.dq = o.dq;  raw.tau = o.tau;
+if isfield(o,'qm'), raw.qm = o.qm;  raw.dqm = o.dqm; end      % 関節弾性つき（issue #73）
 if strcmp(s.type,'excitation'), raw.dq0 = s.dq0; end
 nearLim = raw.q <= sp.qMin + deg2rad(0.1) | raw.q >= sp.qMax - deg2rad(0.1);
 raw.contact = mean(any(nearLim, 2));

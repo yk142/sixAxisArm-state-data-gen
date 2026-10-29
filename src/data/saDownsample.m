@@ -27,5 +27,8 @@ D.tauInst = tau(1 + r*(0:K-1)', :);
 D.qref = [];  D.dqref = [];
 if isfield(raw,'qref') && ~isempty(raw.qref),   D.qref  = double(raw.qref(idx,:));  end
 if isfield(raw,'dqref') && ~isempty(raw.dqref), D.dqref = double(raw.dqref(idx,:)); end
+if isfield(raw,'qm') && ~isempty(raw.qm)         % 関節弾性つき（issue #73）: モータ側の瞬時値
+    D.qm = double(raw.qm(idx,:));  D.dqm = double(raw.dqm(idx,:));
+end
 D.fs = fsOut;
 end

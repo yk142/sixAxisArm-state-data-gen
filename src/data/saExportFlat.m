@@ -49,6 +49,15 @@ for sp = splits
         sid(r) = idx(j)-1;  stp(r) = (0:k-1)';  at(r) = uint8(s.atLimit(:));
         if ~isempty(s.qref), qr(r,:) = s.qref(1:k,:); end
     end
+    if ~isempty(S(idx(1)).qm)      % 関節弾性つき（issue #73）: モータ側の状態 [qm dqm] と次ステップとの差
+        Xm = zeros(N,2*nAx);  Ym = zeros(N,2*nAx);
+        for j = 1:numel(idx)
+            s = S(idx(j));  r = off(j)+1 : off(j+1);  k = s.nTransition;
+            Xm(r,:) = [s.qm(1:k,:), s.dqm(1:k,:)];  Ym(r,:) = [s.qm(2:k+1,:) - s.qm(1:k,:), s.dqm(2:k+1,:) - s.dqm(1:k,:)];
+        end
+        writeMat(outFile, ['/' sp '/Xm'], cast(Xm), opts, 'qm [rad] (link-side equivalent), dqm [rad/s]');
+        writeMat(outFile, ['/' sp '/Ym'], cast(Ym), opts, 'dq_qm [rad], d_dqm [rad/s] per 1 ms step');
+    end
     writeMat(outFile, ['/' sp '/X'],      cast(X),  opts, 'q [rad], dq [rad/s], tau [N*m]; each block has nAx columns');
     writeMat(outFile, ['/' sp '/Y'],      cast(Y),  opts, 'dq_q [rad] (q_next - q), d_dq [rad/s] (dq_next - dq), per 1 ms step');
     writeMat(outFile, ['/' sp '/X_spec'], cast(Xs), opts, 'sin q, cos q, dq/DQ_MAX, tau/TAU_MAX');

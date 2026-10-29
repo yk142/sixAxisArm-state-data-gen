@@ -34,6 +34,11 @@ class Scenario:
         idx = R * np.arange(K + 1)
         self.q_ref, self.dq_ref = qr[idx], dqr[idx]
         self.q, self.dq = g["truth_q"][:].T[idx], g["truth_dq"][:].T[idx]            # Simscape の真値（1 kHz）
+        self.qm = self.dqm = None
+        if "truth_qm" in g:                                                          # 関節弾性つき（issue #71/#73）: モータ側（リンク側換算）
+            qm8 = g["truth_qm"][:].T
+            dqm8 = g["truth_dqm"][:].T if "truth_dqm" in g else np.gradient(qm8, 1.0 / (R * 1000), axis=0)     # 速度が無ければ 8 kHz の角度から数値微分
+            self.qm, self.dqm = qm8[idx], dqm8[idx]
         self.K = K
 
 
@@ -73,3 +78,29 @@ def closed_loop(pred, scen, ctl):
         q, dq = q1, dq1
         qs.append(q); dqs.append(dq)
     return torch.stack(qs, 1).numpy(), torch.stack(dqs, 1).numpy()
+
+
+@torch.no_grad()
+def closed_loop_el(pred, scen, ctl):
+    """モータ側の状態を持つプラント `pred.step(q, dq, qm, dqm, tau)` の閉ループ実行（issue #73）。PD は実機と同じくモータ側 (qm, dqm) でフィードバックする。
+    区間中点の推定は closed_loop と同じ（直前の区間の平均加速度で外挿。モータ側の加速度で qm, dqm を外挿する）。
+    返り値: q, dq, qm, dqm [B, K+1, n]。"""
+    B, n = len(scen), scen[0].q.shape[1]
+    K = max(s.K for s in scen)
+    pad = lambda a, k: np.concatenate([a, np.repeat(a[-1:], k - len(a), 0)]) if len(a) < k else a
+    U = torch.from_numpy(np.stack([pad(s.u, K) for s in scen]))
+    st = lambda a: torch.from_numpy(np.stack([x[0] for x in a]))
+    q, dq, qm, dqm = st([s.q for s in scen]), st([s.dq for s in scen]), st([s.qm for s in scen]), st([s.dqm for s in scen])
+    Kp, Kd, peak = (torch.as_tensor(ctl[k]) for k in ("Kp", "Kd", "peak"))
+    out = [[q], [dq], [qm], [dqm]]
+    h = DT
+    am_prev = torch.zeros_like(dqm)
+    for k in range(K):
+        qm_mid = qm + dqm * h / 2 + am_prev * (h / 2) ** 2 / 2
+        dqm_mid = dqm + am_prev * h / 2
+        tau = torch.minimum(torch.maximum(U[:, k] - Kp * qm_mid - Kd * dqm_mid, -peak), peak)
+        q1, dq1, qm1, dqm1 = pred.step(q, dq, qm, dqm, tau)
+        am_prev = (dqm1 - dqm) / h
+        q, dq, qm, dqm = q1, dq1, qm1, dqm1
+        for o, v in zip(out, (q, dq, qm, dqm)): o.append(v)
+    return tuple(torch.stack(o, 1).numpy() for o in out)

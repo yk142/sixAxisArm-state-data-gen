@@ -34,4 +34,7 @@ out.q  = o.yout.getElement(1).Values.Data;
 out.dq = o.yout.getElement(2).Values.Data;
 out.tau = [];
 if o.yout.numElements >= 3, out.tau = o.yout.getElement(3).Values.Data; end
+if o.yout.numElements >= 5     % 関節弾性つき（issue #73）: モータ側（リンク側換算）の角度・角速度
+    out.qm = o.yout.getElement(4).Values.Data;  out.dqm = o.yout.getElement(5).Values.Data;
+end
 end
