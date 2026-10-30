@@ -15,11 +15,14 @@ from .physics import Arm, DTYPE
 
 
 class TwoMass:
-    def __init__(self, params_json, elastic_json, n_ax=6, dt=1e-3, substeps=4):
+    def __init__(self, params_json, elastic_json, n_ax=6, dt=1e-3, substeps=4, scale=None):
+        """scale: パラメータ倍率 {k, c, Jm, fric(Fc と Bv), mass(リンク質量と慣性)}。感度評価用（issue #81）。省略は 1。"""
+        self.scale = dict(scale or {})
         self.params_json, self.n_ax, self.dt, self.substeps = params_json, n_ax, dt, substeps
         e = json.load(open(elastic_json))
         t = lambda x: torch.as_tensor(x, dtype=DTYPE).reshape(-1)[:n_ax]
         self.k, self.c, self.Jm = t(e["k"]), t(e["c"]), t(e["Jm"])
+        self.k, self.c, self.Jm = self.k * self.scale.get("k", 1), self.c * self.scale.get("c", 1), self.Jm * self.scale.get("Jm", 1)
         self._arms, self._payload = {}, 0.0
 
     @property
@@ -35,6 +38,9 @@ class TwoMass:
         if m not in self._arms:
             a = Arm.from_json(self.params_json, self.n_ax, m)
             a.armature = torch.zeros_like(a.armature)          # 反映慣性はモータ側へ移す
+            a.Fc, a.Bv = a.Fc * self.scale.get("fric", 1), a.Bv * self.scale.get("fric", 1)
+            if "mass" in self.scale:                             # 全リンク（ペイロード込み）の質量・慣性を倍にする（質量誤差の代表）
+                a.mass, a.Ic = a.mass * self.scale["mass"], a.Ic * self.scale["mass"]
             self._arms[m] = a
         return self._arms[m]
 
