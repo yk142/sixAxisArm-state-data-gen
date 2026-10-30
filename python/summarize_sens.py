@@ -46,7 +46,7 @@ def main():
         rows.append((v, dos, dabs, drel, se, ae, match, regret, osv, mb))
     L = [f"真値の最適ゲイン(wn/ζ): " + "、".join(f"{p} kg → {tb[p][0]:g}/{tb[p][1]:g}" for p in pls),
          f"評価ゲイン: wn {sorted({g[0] for g in gains})}、ζ {sorted({g[1] for g in gains})}（{len(gains)} 点）\n",
-         f"| 倍率 | |ΔOS| 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 全区間 q 誤差 最大[deg] | 最適ゲイン一致 | 選択ゲインの整定悪化 | 選択ゲインの真値OS最大[%] | 水準 G |",
+         f"| 倍率 | ΔOS 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 全区間 q 誤差 最大[deg] | 最適ゲイン一致 | 選択ゲインの整定悪化 | 選択ゲインの真値OS最大[%] | 水準 G |",
          "|---|---|---|---|---|---|---|---|---|---|"]
     for v, dos, dabs, drel, se, ae, match, regret, osv, mb in rows:
         ok = dos <= G_DOS and (drel <= G_DST_REL or dabs <= G_DST_ABS) and se <= G_POS and match == len(pls)
