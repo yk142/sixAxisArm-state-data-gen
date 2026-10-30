@@ -47,7 +47,7 @@ def main():
         L.append(f"| {p} | {w} | {z} | {s:.3f} | {M[p, 60, 1.0][2]:.3f} |")
     # 3. 各モデルの真値との差
     L.append("\n## 3. 真値との差（全 %d ケース×6 軸）\n" % ncase)
-    L.append("| モデル | ステップ区間 位置誤差 最大[deg] | 全区間 位置誤差 最大[deg] | |ΔOS| 最大[%] | |Δ整定| 最大[s] |")
+    L.append("| モデル | ステップ区間 位置誤差 最大[deg] | 全区間 位置誤差 最大[deg] | ΔOS 最大[%] | |Δ整定| 最大[s] |")
     L.append("|---|---|---|---|---|")
     for k in PL[1:]:
         se = max(r[k]["step_err_max_deg"] for r in R); ae = max(r[k]["err_axis_max_deg"] for r in R)
@@ -78,7 +78,7 @@ def main():
     # 5. 水準 G の判定（モデル別）
     L.append(f"\n## 5. 水準 G の判定（ΔOS ≤ {G_DOS:g} pt、Δ整定 ≤ {G_DST_REL:.0%} かつ ≤ {G_DST_ABS*1e3:g} ms、ステップ区間位置誤差 ≤ {G_POS:g}°、最適ゲイン一致）\n")
     L.append("ペイロードの区分: 既知 = " + "/".join(map(str, [p for p in pls if p in SEEN])) + " kg、未知 = " + "/".join(map(str, [p for p in pls if p not in SEEN])) + " kg（学習は 0,1,2,4,6,8 kg）\n")
-    L.append("| モデル | 区分 | |ΔOS| 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 最適ゲイン一致 | 水準 G |")
+    L.append("| モデル | 区分 | ΔOS 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 最適ゲイン一致 | 水準 G |")
     L.append("|---|---|---|---|---|---|---|---|")
     for k in PL[1:]:
         for nm, sel in (("既知", [p for p in pls if p in SEEN]), ("未知", [p for p in pls if p not in SEEN]), ("全体", pls)):
