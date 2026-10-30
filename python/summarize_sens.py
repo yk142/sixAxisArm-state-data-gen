@@ -49,12 +49,12 @@ def main():
          f"| 倍率 | ΔOS 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 全区間 q 誤差 最大[deg] | 最適ゲイン一致 | 選択ゲインの整定悪化 | 選択ゲインの真値OS最大[%] | 水準 G |",
          "|---|---|---|---|---|---|---|---|---|---|"]
     for v, dos, dabs, drel, se, ae, match, regret, osv, mb in rows:
-        ok = dos <= G_DOS and (drel <= G_DST_REL or dabs <= G_DST_ABS) and se <= G_POS and match == len(pls)
+        ok = dos <= G_DOS and drel <= G_DST_REL and dabs <= G_DST_ABS and se <= G_POS and match == len(pls)
         L.append(f"| {v} | {dos:.2f} | {dabs*1e3:.1f} | {drel:.1%} | {se:.3f} | {ae:.3f} | {match}/{len(pls)} | {regret:.1%} | {osv:.2f} | {'○' if ok else '×'} |")
     open(f"{a.out}/summary.md", "w").write("\n".join(L) + "\n"); print("\n".join(L))
     names = [r[0] for r in rows]; x = np.arange(len(rows))
     fig, ax = plt.subplots(1, 3, figsize=(15, 4.2))
-    for a_, i, t, lim in ((ax[0], 1, "|ΔOS| 最大 [pt]", G_DOS), (ax[1], 3, "Δ整定 相対最大", G_DST_REL), (ax[2], 4, "ステップ位置誤差 最大 [deg]", G_POS)):
+    for a_, i, t, lim in ((ax[0], 1, "ΔOS 最大 [pt]", G_DOS), (ax[1], 3, "Δ整定 相対最大", G_DST_REL), (ax[2], 4, "ステップ位置誤差 最大 [deg]", G_POS)):
         a_.bar(x, [r[i] for r in rows], color="tab:blue"); a_.axhline(lim, color="r", ls="--", label="水準 G")
         a_.set_xticks(x); a_.set_xticklabels(names, rotation=60, fontsize=8); a_.set_title(t); a_.grid(alpha=.3, axis="y"); a_.set_yscale("log")
     ax[0].legend(); fig.suptitle("2 慣性解析のパラメータ感度（弾性真値、ペイロード 0/8 kg、wn 60–150）"); fig.tight_layout(); fig.savefig(f"{a.out}/sens.png", dpi=110)
