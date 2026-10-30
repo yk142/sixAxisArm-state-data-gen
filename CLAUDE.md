@@ -26,4 +26,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 親資産 `~/matlab-projects/robotArmSurrogate-matlab` は path 参照のみ（コピー・変更しない）
 
 ## 現状
-リポジトリ作成直後。コード・ビルド・テストはまだ無い。
+- Phase 0〜4 完了（#1〜#85）。真値は弾性つき Simscape（#71）、比較基準は 2 慣性解析（`python/sa_nsm/twomass.py`）。
+- 次は Phase 5（docs/plan.md）: 逐次で実時間より速く、水準 G を満たす NN。NN の役割は計算の高速化（#87 で決定）。
+- MATLAB: `src/`・`config/`・`tools/`・`test/`。Python: `python/`（venv `~/.venvs/sa-train`）。データは `data/`（git 管理外）。
