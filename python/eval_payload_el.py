@@ -36,6 +36,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="*", default=[])
     ap.add_argument("--twomass", type=int, default=0, help="2 慣性の解析モデル（issue #77）を追加する。値はサブステップ数（0 で無効、推奨 8）")
+    ap.add_argument("--perturb", nargs="*", default=[], help="2 慣性のパラメータ倍率の組（例 k=1.2 c=0.5,Jm=1.1）。issue #81")
+    ap.add_argument("--pt-sub", type=int, default=8, help="--perturb のサブステップ数")
+    ap.add_argument("--groups", nargs="*", default=None, help="評価するグループ名の接頭辞/部分文字列（例 pl0_ pl8_）")
     ap.add_argument("--data", default="data/export/payload_eval6_el20.h5")
     ap.add_argument("--h5", default="data/export/sa_flat_fullplpu6el.h5", help="スケール（DQ_MAX, TAU_MAX）を読む学習データ")
     ap.add_argument("--out", required=True)
@@ -52,12 +55,17 @@ def main():
     if a.twomass:
         from sa_nsm.twomass import TwoMass
         plants[f"2慣性解析（sub{a.twomass}）"] = TwoMass("data/export/c8_params.json", "data/export/elastic20.json", substeps=a.twomass)
+    for pt in a.perturb:
+        sc_ = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in pt.split(",")}
+        from sa_nsm.twomass import TwoMass
+        plants[f"2慣性 {pt}"] = TwoMass("data/export/c8_params.json", "data/export/elastic20.json", substeps=a.pt_sub, scale=sc_)
     os.makedirs(a.out, exist_ok=True)
     res = []
     with h5py.File(a.data, "r") as f:
         peak = f["controller/tauPeak"][:].ravel()
         groups = sorted({k.rsplit("_j", 1)[0] for k in f if k != "controller"})
         groups = [g for g in groups if float(np.ravel(f[g + "_j1"].attrs["wn"])[0]) >= a.wn_min]
+        if a.groups: groups = [g for g in groups if any(x in g for x in a.groups)]
         for gi, gk in enumerate(groups):
             if gi % sk != si: continue
             m = int(f[gk + "_j1"].attrs["payload"])
