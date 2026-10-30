@@ -9,6 +9,7 @@ matplotlib.rcParams["font.family"] = ["Noto Sans CJK JP", "DejaVu Sans"]
 OS_LIM = 5.0   # 許容オーバーシュート [%]
 SEEN = (0, 1, 8)   # 学習に含まれるペイロード（評価点のうち。学習は 0,1,2,4,6,8 kg）
 G_DOS, G_DST_REL, G_DST_ABS, G_POS = 2.0, 0.10, 0.020, 0.1    # 水準 G（docs/phase4_8）: ΔOS[pt]、Δ整定 相対/絶対[s]、ステップ区間位置誤差[deg]
+G_REGRET, G_OS_CHOSEN = 0.10, OS_LIM + G_DOS   # 水準 G の最適ゲイン（issue #89）: 選んだゲインの真値の整定悪化 ≤ 10%、真値の OS 最大 ≤ 5 + 2 %
 
 
 def main():
@@ -76,10 +77,11 @@ def main():
         L.append(f"| {p} | " + " | ".join(row) + " |")
     L.append("\n一致数（/%d）: " % len(pls) + "、".join(f"{k} {v}" for k, v in agree.items()))
     # 5. 水準 G の判定（モデル別）
-    L.append(f"\n## 5. 水準 G の判定（ΔOS ≤ {G_DOS:g} pt、Δ整定 ≤ {G_DST_REL:.0%} かつ ≤ {G_DST_ABS*1e3:g} ms、ステップ区間位置誤差 ≤ {G_POS:g}°、最適ゲイン一致）\n")
+    L.append(f"\n## 5. 水準 G の判定（ΔOS ≤ {G_DOS:g} pt、Δ整定 ≤ {G_DST_REL:.0%} かつ ≤ {G_DST_ABS*1e3:g} ms、ステップ区間位置誤差 ≤ {G_POS:g}°、選択ゲインの整定悪化 ≤ {G_REGRET:.0%}・真値 OS ≤ {G_OS_CHOSEN:g}%）\n")
     L.append("ペイロードの区分: 既知 = " + "/".join(map(str, [p for p in pls if p in SEEN])) + " kg、未知 = " + "/".join(map(str, [p for p in pls if p not in SEEN])) + " kg（学習は 0,1,2,4,6,8 kg）\n")
-    L.append("| モデル | 区分 | ΔOS 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 最適ゲイン一致 | 水準 G |")
-    L.append("|---|---|---|---|---|---|---|---|")
+    L.append(f"最適ゲインは「一致」ではなく、モデルが選んだゲインを真値で動かしたときの整定の悪化（真値の最適に対して ≤ {G_REGRET:.0%}）と真値の OS 最大（≤ {G_OS_CHOSEN:g}%）で判定する（issue #89）。一致は参考。\n")
+    L.append("| モデル | 区分 | ΔOS 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 選択ゲインの整定悪化 最大 | 選択ゲインの真値 OS 最大[%] | 最適ゲイン一致（参考） | 水準 G |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|")
     for k in PL[1:]:
         for nm, sel in (("既知", [p for p in pls if p in SEEN]), ("未知", [p for p in pls if p not in SEEN]), ("全体", pls)):
             if not sel: continue
@@ -89,7 +91,7 @@ def main():
             d = [(x, t) for x, t in d if np.isfinite(x)]
             dabs = max(x for x, t in d); drel = max(x / t for x, t in d)
             se = max(r[k]["step_err_max_deg"] for r in rs)
-            ok_g = 0; n_g = 0
+            ok_g = 0; n_g = 0; regret = 0.0; os_ch = 0.0
             for p in sel:
                 sc = {}
                 for w in wns:
@@ -97,9 +99,15 @@ def main():
                         q = [G(p, w, z, ax)[k] for ax in axes]
                         sc[w, z] = (max(r_["overshoot_pct"] for r_ in q), np.nanmean([r_["settle_s"] for r_ in q]))
                 c = [(v[1], w, z) for (w, z), v in sc.items() if v[0] <= OS_LIM]
-                ok_g += ((min(c)[1:] if c else (None, None)) == best[p]); n_g += 1
-            judge = dos <= G_DOS and (drel <= G_DST_REL or dabs <= G_DST_ABS) and se <= G_POS and ok_g == n_g
-            L.append(f"| {k} | {nm} | {dos:.2f} | {dabs*1e3:.1f} | {drel:.1%} | {se:.2e} | {ok_g}/{n_g} | {'○' if judge else '×'} |")
+                ch = min(c)[1:] if c else (None, None)
+                ok_g += (ch == best[p]); n_g += 1
+                if ch[0] is None:
+                    regret = np.inf; os_ch = np.inf
+                else:
+                    regret = max(regret, M[p, ch[0], ch[1]][2] / M[p, best[p][0], best[p][1]][2] - 1)       # 真値の整定平均の悪化
+                    os_ch = max(os_ch, M[p, ch[0], ch[1]][1])                                                # 真値の OS 最大
+            judge = dos <= G_DOS and drel <= G_DST_REL and dabs <= G_DST_ABS and se <= G_POS and regret <= G_REGRET and os_ch <= G_OS_CHOSEN
+            L.append(f"| {k} | {nm} | {dos:.2f} | {dabs*1e3:.1f} | {drel:.1%} | {se:.2e} | {regret:.1%} | {os_ch:.2f} | {ok_g}/{n_g} | {'○' if judge else '×'} |")
     open(os.path.join(a.out, "summary.md"), "w").write("\n".join(L) + "\n")
     print("\n".join(L))
     # 図
