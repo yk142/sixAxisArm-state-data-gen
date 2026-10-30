@@ -32,11 +32,31 @@ class ElPlant:
                 qm + dqm * h + p[:, 2 * n:3 * n] * h ** 2, dqm + p[:, 3 * n:] * h)
 
 
+class BPlant:
+    """2 慣性解析（パラメータ誤差つき）+ 残差 NN（train_b_el.py。issue #85）。payload [kg] を属性で与える。"""
+    def __init__(self, path, substeps):
+        from sa_nsm.twomass import TwoMass
+        from train_b_el import ResNet, parse_scale
+        cfg = json.load(open(f"{path}/config.json")); n = cfg["n_ax"]; d = cfg["d_in"]; z = np.zeros(d)
+        self.tm = TwoMass("data/export/c8_params.json", "data/export/elastic20.json", n_ax=n, substeps=substeps or cfg["substeps"], scale=parse_scale(cfg["perturb"]))
+        self.m = ResNet(n, d, z, np.ones(d), np.ones(n), cfg["width"], cfg["depth"])
+        self.m.load_state_dict(torch.load(f"{path}/model.pt")); self.m.eval()
+        self.n, self.payload, self.Jm = n, 0.0, self.tm.Jm
+
+    @torch.no_grad()
+    def step(self, q, dq, qm, dqm, tau):
+        self.tm.payload = self.payload
+        xs = torch.cat([torch.sin(q), torch.cos(q), dq / self.dq_max, (qm - q) / THETA_SCALE, dqm / self.dq_max, tau / self.tau_max,
+                        torch.full((len(q), 1), self.payload / PAYLOAD_SCALE, dtype=q.dtype)], -1).float()
+        return self.tm.step(q, dq, qm, dqm, tau, self.m(xs))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="*", default=[])
     ap.add_argument("--twomass", type=int, default=0, help="2 慣性の解析モデル（issue #77）を追加する。値はサブステップ数（0 で無効、推奨 8）")
     ap.add_argument("--perturb", nargs="*", default=[], help="2 慣性のパラメータ倍率の組（例 k=1.2 c=0.5,Jm=1.1）。issue #81")
+    ap.add_argument("--bmodels", nargs="*", default=[], help="B 型（2 慣性 + 残差 NN）のモデルディレクトリ（issue #85）")
     ap.add_argument("--pt-sub", type=int, default=8, help="--perturb のサブステップ数")
     ap.add_argument("--groups", nargs="*", default=None, help="評価するグループ名の接頭辞/部分文字列（例 pl0_ pl8_）")
     ap.add_argument("--data", default="data/export/payload_eval6_el20.h5")
@@ -55,6 +75,9 @@ def main():
     if a.twomass:
         from sa_nsm.twomass import TwoMass
         plants[f"2慣性解析（sub{a.twomass}）"] = TwoMass("data/export/c8_params.json", "data/export/elastic20.json", substeps=a.twomass)
+    for p in a.bmodels:
+        pl = BPlant(p, a.pt_sub); pl.dq_max, pl.tau_max = torch.as_tensor(dq_max), torch.as_tensor(tau_max)
+        plants[f"B型（{os.path.basename(p)}）"] = pl
     for pt in a.perturb:
         sc_ = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in pt.split(",")}
         from sa_nsm.twomass import TwoMass
