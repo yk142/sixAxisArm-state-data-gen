@@ -44,23 +44,28 @@ class TwoMass:
             self._arms[m] = a
         return self._arms[m]
 
-    def accel(self, q, dq, qm, dqm, tau):
-        """(ddq, ddqm)。"""
+    def accel(self, q, dq, qm, dqm, tau, res=None):
+        """(ddq, ddqm)。res = (rl, rm) は残差トルク（リンク側・モータ側。issue #85）。"""
         a = self.arm()
         ts = self.k * (qm - q) + self.c * (dqm - dq)
-        g, b, M = a.matrices(q, dq)
+        with torch.no_grad():                                     # g, b, M は q, dq の関数。残差 NN の勾配には通さない（凍結係数）
+            g, b, M = a.matrices(q.detach(), dq.detach())
         rhs = ts - g - b - a.friction(dq)
-        return torch.linalg.solve(M, rhs.unsqueeze(-1)).squeeze(-1), (tau - ts) / self.Jm
+        tm = tau - ts
+        if res is not None:
+            rhs, tm = rhs + res[0], tm + res[1]
+        return torch.linalg.solve(M, rhs.unsqueeze(-1)).squeeze(-1), tm / self.Jm
 
-    def _f(self, s, tau):
-        a, am = self.accel(*s, tau)
+    def _f(self, s, tau, res=None):
+        a, am = self.accel(*s, tau, res)
         return torch.cat([s[1], a, s[3], am], -1)
 
     def _jac(self, s):
         """ROS2 用の近似ヤコビアン（ばね・ダンパ・摩擦の傾き。重力・コリオリの微分は無視）。[B, 4n, 4n]。"""
         q, dq, qm, dqm = s
         a = self.arm(); n, B = self.n_ax, q.shape[0]
-        _, _, M = a.matrices(q, dq)
+        with torch.no_grad():
+            _, _, M = a.matrices(q.detach(), dq.detach())
         Mi = torch.linalg.inv(M)
         Dfr = a.Bv + a.Fc / a.eps / torch.cosh(dq / a.eps) ** 2           # 摩擦の傾き [B, n]
         K, C = torch.diag(self.k), torch.diag(self.c)
@@ -74,8 +79,12 @@ class TwoMass:
                 torch.cat([Kj, Cj, -Kj, -Cj], -1)]
         return torch.cat(rows, -2)
 
-    @torch.no_grad()
-    def step(self, q, dq, qm, dqm, tau):
+    def step(self, q, dq, qm, dqm, tau, res=None, diff=False):
+        """res=(rl, rm): 1 ステップ一定の残差トルク。diff=True で res に対して微分可能（学習用）。"""
+        with torch.set_grad_enabled(diff):
+            return self._step(q, dq, qm, dqm, tau, res)
+
+    def _step(self, q, dq, qm, dqm, tau, res):
         """線形陰解法 ROS2（Verwer、2 次精度・L 安定）。手首はリンク側慣性が極小（1e-3〜1e-4）で、摩擦の剛性 Fc/(ε·J) が 1e4〜1e5 /s になり、
         明示法（RK4）は 1 ms 刻みで不安定になる。ヤコビアンは近似でよい（W 法）。"""
         s = tuple(x.to(DTYPE) for x in (q, dq, qm, dqm)); tau = tau.to(DTYPE)
@@ -85,10 +94,11 @@ class TwoMass:
         split = lambda y: tuple(y[:, i * n:(i + 1) * n] for i in range(4))
         y = torch.cat(s, -1)
         for _ in range(self.substeps):
-            W = Id - g * h * self._jac(split(y))
-            f0 = self._f(split(y), tau)
+            with torch.no_grad():
+                W = Id - g * h * self._jac(split(y))
+            f0 = self._f(split(y), tau, res)
             k1 = torch.linalg.solve(W, f0.unsqueeze(-1)).squeeze(-1)
-            f1 = self._f(split(y + h * k1), tau)
+            f1 = self._f(split(y + h * k1), tau, res)
             k2 = torch.linalg.solve(W, (f1 - 2 * k1).unsqueeze(-1)).squeeze(-1)
             y = y + 1.5 * h * k1 + 0.5 * h * k2
         return split(y)
