@@ -192,11 +192,14 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
 
 
 class TwoMassNB:
-    def __init__(self, params_json, elastic_json, dt=1e-3, substeps=8, frozen=0):
+    def __init__(self, params_json, elastic_json, dt=1e-3, substeps=8, frozen=0, scale=None):
+        """scale: パラメータ倍率 {k, c, Jm, fric（Fc と Bv）, Fc, Bv, mass（全リンクの質量・慣性）}（twomass.TwoMass と同じ。issue #95）。"""
+        self.scale = dict(scale or {})
         self.params_json, self.dt, self.substeps, self.frozen = params_json, dt, substeps, frozen
         e = json.load(open(elastic_json))
         f = lambda x: np.asarray(x, float).reshape(-1)[:6].copy()
-        self.k, self.c, self.Jm_np = f(e["k"]), f(e["c"]), f(e["Jm"])
+        g = lambda key: self.scale.get(key, 1.0)
+        self.k, self.c, self.Jm_np = f(e["k"]) * g("k"), f(e["c"]) * g("c"), f(e["Jm"]) * g("Jm")
         import torch
         self.Jm = torch.from_numpy(self.Jm_np.copy())          # closed_loop_el が参照する（torch）
         self._consts, self._payload = {}, 0.0
@@ -215,7 +218,10 @@ class TwoMassNB:
             a = Arm.from_json(self.params_json, 6, m)
             n = lambda t: t.detach().numpy().astype(float).copy()
             g0 = n(a.r_base.T @ (-a.gravity))
-            self._consts[m] = (n(a.R0), n(a.pj), n(a.mass), n(a.com), n(a.Ic), g0, self.k, self.c, self.Jm_np, n(a.Bv), n(a.Fc), n(a.eps))
+            g = lambda key: self.scale.get(key, 1.0)
+            ms = g("mass")
+            self._consts[m] = (n(a.R0), n(a.pj), n(a.mass) * ms, n(a.com), n(a.Ic) * ms, g0, self.k, self.c, self.Jm_np,
+                               n(a.Bv) * g("fric") * g("Bv"), n(a.Fc) * g("fric") * g("Fc"), n(a.eps))
         return self._consts[m]
 
     def step_np(self, y, tau):
