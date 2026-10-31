@@ -33,6 +33,8 @@ def main():
     ap.add_argument("--data", required=True, help="真値（比較の基準）")
     ap.add_argument("--ref", default=None, help="もう一つの真値（許容誤差違い）。指定するとモデルの代わりにこれを比べる")
     ap.add_argument("--twomass-nb", nargs="*", default=[], help="'サブステップ:凍結' の組")
+    ap.add_argument("--perturb", nargs="*", default=[], help="パラメータ倍率の組（例 fric=1.01 mass=0.97,k=1.1）。numba sub4・M 凍結で評価（issue #95）")
+    ap.add_argument("--pt-spec", default="4:1", help="--perturb のサブステップ:凍結")
     ap.add_argument("--iters", type=int, default=1)
     ap.add_argument("--out", required=True)
     ap.add_argument("--threads", type=int, default=1)
@@ -44,6 +46,11 @@ def main():
         from sa_nsm.twomass_nb import TwoMassNB
         sub, fz = (int(x) for x in spec.split(":"))
         plants[f"2慣性 numba sub{sub}" + ("（M 凍結）" if fz else "")] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz)
+    for pt in a.perturb:
+        from sa_nsm.twomass_nb import TwoMassNB
+        sub, fz = (int(x) for x in a.pt_spec.split(":"))
+        sc_ = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in pt.split(",")}
+        plants[f"2慣性 {pt}"] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, scale=sc_)
     res, tim = [], []
     with h5py.File(a.data, "r") as f:
         ctl = load_controller(f)
