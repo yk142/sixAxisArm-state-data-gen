@@ -5,6 +5,7 @@ function addSaElasticArmature(mdl, p, el)
 %   addC8Armature は反映慣性 Jm*N^2（p.armature）を RMI の 1-D ノードに直結（= 関節に剛結合）する。ここでは
 %       RMI のノード R（リンク側） —[ばね k ∥ ダンパ c]— ノード M（モータ側、慣性 p.armature、理想トルク源が制御トルクを印加）
 %   とし、制御トルクは関節ではなくモータ側に入る。関節（joint/t）には RMI の反作用トルクだけが入る。
+%   el.stiffA・el.stiffThetaRef（issue #97、addSaUnmodeled の非線形剛性）があれば、線形ばねの代わりに saSsc.nl_spring を置く。
 %   k → ∞ で addC8Armature と同じ（剛体極限）。モータ側の角度・角速度（リンク側換算）をセンサで取り、トップレベルに
 %   Outport 'qm', 'dqm'（[nAx]）として出す。
 n = p.nJoints;
@@ -28,7 +29,12 @@ for i = 1:n
     jm = sprintf('motorJ_%d', i);  ts = sprintf('motorTq_%d', i);  sn = sprintf('motorSns_%d', i);
     r1 = sprintf('rotRef_%d', i);  r2 = sprintf('motorRefT_%d', i);  r3 = sprintf('motorRefS_%d', i);
     add_block(RMI, [mdl '/' rmi], 'Position', [330 yb 380 yb+40]);
-    add_block(SPR, [mdl '/' spr], 'Position', [450 yb 490 yb+20]);   set_param([mdl '/' spr], 'spr_rate', sprintf('%.10g', el.k(i)));
+    if isfield(el,'stiffA') && el.stiffA ~= 0           % 非線形剛性（issue #97）: τ = k·θ·(1 + a·(θ/θr)²) の Simscape 言語の部品
+        add_block('saSsc_lib/nl_spring', [mdl '/' spr], 'Position', [450 yb 490 yb+20]);
+        set_param([mdl '/' spr], 'k', sprintf('%.10g', el.k(i)), 'a', sprintf('%.10g', el.stiffA), 'thr', sprintf('%.10g', el.stiffThetaRef));
+    else
+        add_block(SPR, [mdl '/' spr], 'Position', [450 yb 490 yb+20]);   set_param([mdl '/' spr], 'spr_rate', sprintf('%.10g', el.k(i)));
+    end
     add_block(DMP, [mdl '/' dmp], 'Position', [450 yb+30 490 yb+50]); set_param([mdl '/' dmp], 'D', sprintf('%.10g', el.c(i)));
     add_block(ROT, [mdl '/' jm],  'Position', [540 yb 580 yb+30]);   set_param([mdl '/' jm], 'inertia', sprintf('%.10g', p.armature(i)));
     add_block(TSRC, [mdl '/' ts], 'Position', [540 yb+40 580 yb+70]);

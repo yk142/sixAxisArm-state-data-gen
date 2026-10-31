@@ -9,6 +9,7 @@ function mdl = buildSaPlant(nAx, opts)
 %                     RMI（armature）の 1-D/3-D 接続の自動フィルタの時定数で、小さいほど応答の遅れが減る。
 %                     ode14x では 5e-4 以下で不安定になる（docs/phase1_report.md）。ode15s では 1e-6 まで安定
 %
+%     opts.unmodeled  解析モデルの式にない効果（issue #97、addSaUnmodeled の um。非線形剛性・Stribeck 摩擦）。elastic と一緒に使う
 %     opts.elastic    関節弾性（issue #71、saElasticParams の引数。既定は空 = 剛体）。指定時は Outport 'qm', 'dqm'（モータ側、リンク側換算）が 3, 4 番に加わる
 %
 %   共通 I/F: Inport 'tau' [nAx] (N*m) → Outport 'q' [nAx] (rad), 'dq' [nAx] (rad/s)
@@ -62,12 +63,18 @@ set_param(scb{1},'FilteringTimeConstant',num2str(opts.filterTc,'%.12g'));
 pn = p;  pn.nJoints = nAx;
 addC8Actuation(mdl, pn);
 if isfield(opts,'elastic') && ~isempty(opts.elastic)
-    addSaElasticArmature(mdl, pn, saElasticParams(nAx, opts.elastic));
+    el = saElasticParams(nAx, opts.elastic);
+    if isfield(opts,'unmodeled') && ~isempty(opts.unmodeled), el = saUnmodeledElastic(el, opts.unmodeled); end   % 非線形剛性（issue #97）
+    addSaElasticArmature(mdl, pn, el);
     set_param([mdl '/qm'],'Port','3');  set_param([mdl '/dqm'],'Port','4');
 else
     addC8Armature(mdl, pn);
 end
 addC8Friction(mdl, pn);
+if isfield(opts,'unmodeled') && ~isempty(opts.unmodeled)          % 解析モデルの式にない効果（issue #97、弾性つきのみ）
+    assert(isfield(opts,'elastic') && ~isempty(opts.elastic), 'buildSaPlant:unmodeled', 'opts.unmodeled は opts.elastic と一緒に使う');
+    addSaUnmodeled(mdl, pn, el, opts.unmodeled);                     % Stribeck 摩擦
+end
 save_system(mdl, opts.slxPath);
 fprintf('buildSaPlant: 保存 %s (revolute=%d, step=%.4g s)\n', opts.slxPath, ...
     numel(find_system(mdl,'MaskType','Revolute Joint')), 1/c.fsSim);

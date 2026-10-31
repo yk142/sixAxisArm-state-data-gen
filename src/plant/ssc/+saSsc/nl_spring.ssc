@@ -1,0 +1,25 @@
+component nl_spring
+% nl_spring
+% 非線形（3 次）ねじりばね（issue #97）。τ = k·θ·(1 + a·(θ/θr)²)、θ = R − C の相対角（Foundation の Rotational Spring と同じ向き）。
+% 線形ばね（elSpring）を置き換えて使う（並列に置くとねじれ角の状態が重複し、代数ループになった）。a = 0 で線形ばねと同じ。
+  nodes
+    R = foundation.mechanical.rotational.rotational; % R:left
+    C = foundation.mechanical.rotational.rotational; % C:right
+  end
+  parameters
+    k   = {1, 'N*m/rad'};   % 線形ばねの剛性
+    a   = {0, '1'};         % 硬化係数
+    thr = {0.01, 'rad'};    % 基準ねじれ角
+  end
+  variables
+    t   = {0, 'N*m'};
+    phi = {value = {0, 'rad'}, priority = priority.none};   % ねじれ角（初期 0）
+  end
+  branches
+    t : R.t -> C.t;
+  end
+  equations
+    phi.der == R.w - C.w;
+    t == k*phi*(1 + a*phi^2/thr^2);
+  end
+end
