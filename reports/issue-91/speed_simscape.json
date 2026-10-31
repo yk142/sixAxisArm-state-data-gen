@@ -1,0 +1,13 @@
+{
+  "build_s": 163.852417,
+  "first_sim_s": 21.023359,
+  "sim_s": [
+    9.536422,
+    9.567962,
+    8.62551
+  ],
+  "sim_time_s": 1.8,
+  "ms_per_step": 4.79195,
+  "realtime_ratio": 4.79195,
+  "elastic": true
+}
