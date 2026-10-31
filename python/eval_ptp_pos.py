@@ -36,6 +36,8 @@ def main():
     ap.add_argument("--perturb", nargs="*", default=[], help="パラメータ倍率の組（例 fric=1.01 mass=0.97,k=1.1）。numba sub4・M 凍結で評価（issue #95）")
     ap.add_argument("--scale-json", nargs="*", default=[], help="identify_el.py の出力（倍率、軸ごと）。numba 2 慣性解析に与えて評価（issue #99）")
     ap.add_argument("--hybrid", nargs="*", default=[], help="'同定 JSON,残差 npz' の組。④ ハイブリッド（issue #101）")
+    ap.add_argument("--oracle", nargs="*", default=[], help="'サブステップ:凍結[:all|spring|stribeck[:nojac]]'（nojac: 効果の微分をヤコビアンに入れない＝④ と同じ扱い）。真値に入れたモデル外の効果の式をそのまま足した 2 慣性解析（公称パラメータ、issue #103）")
+    ap.add_argument("--hybrid-spec", nargs="*", default=[], help="--hybrid を評価するサブステップ:凍結の組（省略時は --pt-spec）")
     ap.add_argument("--pt-spec", default="4:1", help="--perturb のサブステップ:凍結")
     ap.add_argument("--iters", type=int, default=1)
     ap.add_argument("--out", required=True)
@@ -60,10 +62,17 @@ def main():
         plants[f"2慣性 同定（{os.path.basename(os.path.dirname(sj))}/{os.path.basename(sj)}）"] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, scale=sc_)
     for hy in a.hybrid:
         from sa_nsm.twomass_nb import TwoMassNB
-        sub, fz = (int(x) for x in a.pt_spec.split(":"))
         sj, npz = hy.split(",")
         sc_ = {k: np.asarray(v, float) for k, v in json.load(open(sj))["scale"].items()}
-        plants[f"④ ハイブリッド（{os.path.basename(os.path.dirname(npz))}）"] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, scale=sc_, residual=npz)
+        for spec in (a.hybrid_spec or [a.pt_spec]):
+            sub, fz = (int(x) for x in spec.split(":"))
+            sfx = f" sub{sub}" + ("（M 凍結）" if fz else "") if a.hybrid_spec else ""
+            plants[f"④ ハイブリッド（{os.path.basename(os.path.dirname(npz))}）{sfx}"] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, scale=sc_, residual=npz)
+    for spec in a.oracle:
+        from sa_nsm.twomass_nb import TwoMassNB
+        sp = spec.split(":"); sub, fz = int(sp[0]), int(sp[1]); part = sp[2] if len(sp) > 2 else "all"
+        o = {"stiffA": 0.3 if part in ("all", "spring") else 0.0, "stribeck": 0.3 if part in ("all", "stribeck") else 0.0, "jac": 0 if "nojac" in sp[3:] else 1}
+        plants[f"オラクル（{part}{'、J なし' if o['jac'] == 0 else ''}）sub{sub}" + ("（M 凍結）" if fz else "")] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, oracle=o)
     res, tim = [], []
     def load(paths):
         out = {}

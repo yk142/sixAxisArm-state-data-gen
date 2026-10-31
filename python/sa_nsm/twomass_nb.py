@@ -158,10 +158,29 @@ def _resid(th, dth, dq, R):
 
 
 @njit(cache=True)
-def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R):
+def _oracle(th, dq, U):
+    """正解の式（issue #103）: 真値に入れたモデル外の効果そのもの（addSaUnmodeled と同じ式）。U = (use, a, θr, Fs[6], vs[6], eps[6])。
+    返り値 (Δs, Δf, ∂Δs/∂θ, ∂Δf/∂dq)。Δs = k·a·θ³/θr² は k を掛ける前の値（呼び出し側で k 倍）。"""
+    n = 6
+    ds = np.zeros(n); df = np.zeros(n); dds = np.zeros(n); ddf = np.zeros(n)
+    if U[0] == 0:
+        return ds, df, dds, ddf
+    a, thr, Fs, vs, ep = U[1][0], U[1][1], U[2], U[3], U[4]
+    for i in range(n):
+        ds[i] = a * th[i] ** 3 / thr ** 2; dds[i] = 3.0 * a * th[i] ** 2 / thr ** 2
+        ex = np.exp(-(dq[i] / vs[i]) ** 2); th_ = np.tanh(dq[i] / ep[i])
+        df[i] = Fs[i] * ex * th_
+        ddf[i] = Fs[i] * ex * ((1.0 - th_ ** 2) / ep[i] - 2.0 * dq[i] / vs[i] ** 2 * th_)
+    return ds, df, dds, ddf
+
+
+@njit(cache=True)
+def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R, U):
     n = 6
     q, dq, qm, dqm = y[:n], y[n:2 * n], y[2 * n:3 * n], y[3 * n:]
     ds, df = _resid(qm - q, dqm - dq, dq, R)
+    os_, of, _, _ = _oracle(qm - q, dq, U)
+    ds = ds + k * os_; df = df + of
     ts = k * (qm - q) + c * (dqm - dq) + ds
     rhs = ts - gb - (Bv * dq + Fc * np.tanh(dq / eps) + df)
     out = np.empty(4 * n)
@@ -173,7 +192,7 @@ def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R):
 
 
 @njit(cache=True)
-def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc, eps, R):
+def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc, eps, R, U):
     """1 行の ROS2（frozen=0 は twomass.TwoMass._step と同じ）。y: [24]。
     frozen=1: M(q) と g+b を 1 ms の始点で 1 回だけ計算し、サブステップ内で使い回す（RNEA 8 回/ms。q の変化は 1 ms で小さい）。"""
     n = 6
@@ -190,22 +209,27 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
             e = np.zeros(n); e[j] = 1.0
             Mi[:, j] = _lu_solve(MLU, Mpiv, e)
         Dfr = Bv + Fc / eps / np.cosh(dq / eps) ** 2
+        _, _, dds, ddf = _oracle(y[2 * n:3 * n] - q, dq, U)       # 正解の式の微分（issue #103。U 無効なら 0）
+        if U[0] != 0 and U[1][2] == 0.0:                             # 微分を J に入れない（④ の残差 NN と同じ扱い）
+            dds = np.zeros(n); ddf = np.zeros(n)
+        ke = k * (1.0 + dds); Dfr = Dfr + np.maximum(ddf, 0.0)
+        # Stribeck の負の傾きはヤコビアンに入れない: J に正の固有値 λ ができ、γ·h·λ ≈ 1 で W = I − γhJ が特異になって発散した（sub8 で 48 回中 24 回 NaN）
         J = np.zeros((4 * n, 4 * n))
         for i in range(n):
             J[i, n + i] = 1.0
             J[2 * n + i, 3 * n + i] = 1.0
             for j in range(n):
-                J[n + i, j] = -Mi[i, j] * k[j]
+                J[n + i, j] = -Mi[i, j] * ke[j]
                 J[n + i, n + j] = -(Mi[i, j] * c[j] + Mi[i, j] * Dfr[j])
-                J[n + i, 2 * n + j] = Mi[i, j] * k[j]
+                J[n + i, 2 * n + j] = Mi[i, j] * ke[j]
                 J[n + i, 3 * n + j] = Mi[i, j] * c[j]
-            J[3 * n + i, i] = k[i] / Jm[i]
+            J[3 * n + i, i] = ke[i] / Jm[i]
             J[3 * n + i, n + i] = c[i] / Jm[i]
-            J[3 * n + i, 2 * n + i] = -k[i] / Jm[i]
+            J[3 * n + i, 2 * n + i] = -ke[i] / Jm[i]
             J[3 * n + i, 3 * n + i] = -c[i] / Jm[i]
         W = I24 - gam * h * J
         WLU, Wpiv = _lu(W)
-        f0 = _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R)
+        f0 = _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R, U)
         k1 = _lu_solve(WLU, Wpiv, f0)
         y1 = y + h * k1
         if frozen == 0:
@@ -213,7 +237,7 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
             M1LU, M1piv = _lu(M1)
         else:
             gb1 = gb; M1LU = MLU; M1piv = Mpiv
-        f1 = _f(y1, tau, M1LU, M1piv, gb1, k, c, Jm, Bv, Fc, eps, R)
+        f1 = _f(y1, tau, M1LU, M1piv, gb1, k, c, Jm, Bv, Fc, eps, R, U)
         k2 = _lu_solve(WLU, Wpiv, f1 - 2.0 * k1)
         y = y + 1.5 * h * k1 + 0.5 * h * k2
     return y
@@ -229,8 +253,9 @@ def _load_residual(path):
 
 
 class TwoMassNB:
-    def __init__(self, params_json, elastic_json, dt=1e-3, substeps=8, frozen=0, scale=None, residual=None):
-        """scale: パラメータ倍率 {k, c, Jm, fric（Fc と Bv）, Fc, Bv, mass（全リンクの質量・慣性）}（twomass.TwoMass と同じ。issue #95）。"""
+    def __init__(self, params_json, elastic_json, dt=1e-3, substeps=8, frozen=0, scale=None, residual=None, oracle=None):
+        """scale: パラメータ倍率 {k, c, Jm, fric（Fc と Bv）, Fc, Bv, mass（全リンクの質量・慣性）}（twomass.TwoMass と同じ。issue #95）。
+        oracle: 真値に入れたモデル外の効果の式をそのまま足す（issue #103）。{stiffA, stiffThetaRef, stribeck, vsMul}（saUnmodeledDefaults と同じ意味）。"""
         self.scale = dict(scale or {})
         self.params_json, self.dt, self.substeps, self.frozen = params_json, dt, substeps, frozen
         e = json.load(open(elastic_json))
@@ -241,6 +266,7 @@ class TwoMassNB:
         self.Jm = torch.from_numpy(self.Jm_np.copy())          # closed_loop_el が参照する（torch）
         self._consts, self._payload = {}, 0.0
         self.R = _load_residual(residual)                         # 残差トルク NN（issue #101、fit_residual_el.py の residual.npz）
+        self.oracle = oracle
 
     @property
     def payload(self):
@@ -262,9 +288,20 @@ class TwoMassNB:
                                n(a.Bv) * g("fric") * g("Bv"), n(a.Fc) * g("fric") * g("Fc"), n(a.eps))
         return self._consts[m]
 
+    def _U(self):
+        if not hasattr(self, "_Uc"):
+            o = self.oracle; z = np.zeros(6)
+            if not o:
+                self._Uc = (0, np.zeros(3), z, np.ones(6), np.ones(6))
+            else:
+                P = json.load(open(self.params_json)); f = lambda x: np.asarray(x, float).reshape(-1)[:6].copy()
+                ep, Fc = f(P["frictionEps"]), f(P["frictionFc"])          # 真値の Stribeck は公称の Fc・ε が基準
+                self._Uc = (1, np.array([o.get("stiffA", 0.3), o.get("stiffThetaRef", 0.005), float(o.get("jac", 1))]), o.get("stribeck", 0.3) * Fc, o.get("vsMul", 2.0) * ep, ep)
+        return self._Uc
+
     def step_np(self, y, tau):
         """y: [24]、tau: [6]（numpy）→ [24]。逐次の計測用（変換なし）。"""
-        return _step1(y, tau, self.dt / self.substeps, self.substeps, self.frozen, *self.consts(), self.R)
+        return _step1(y, tau, self.dt / self.substeps, self.substeps, self.frozen, *self.consts(), self.R, self._U())
 
     def step(self, q, dq, qm, dqm, tau):
         is_t = hasattr(q, "numpy")
@@ -273,7 +310,7 @@ class TwoMassNB:
         cs = self.consts(); h = self.dt / self.substeps
         out = np.empty_like(Y)
         for b in range(Y.shape[0]):
-            out[b] = _step1(Y[b], T[b], h, self.substeps, self.frozen, *cs, self.R)
+            out[b] = _step1(Y[b], T[b], h, self.substeps, self.frozen, *cs, self.R, self._U())
         if is_t:
             import torch
             out = torch.from_numpy(out)
