@@ -16,12 +16,20 @@ from sa_nsm.physics import Arm
 DT8 = 1.0 / 8000
 
 
-def load(paths, stride):
+def load(paths, stride, frac=1.0, seed=0):
+    """frac < 1: シナリオ単位で無作為に frac の割合だけ使う（データ量の軸、issue #101）。"""
     X = {k: [] for k in ("q", "dq", "qm", "dqm", "tau", "ddq", "ddqm")}
+    keys = []
+    for p in paths:
+        with h5py.File(p, "r", locking=False) as f:
+            keys += [(p, k) for k in f if k != "controller" and "truth_tau" in f[k]]
+    if frac < 1.0:
+        rs = np.random.RandomState(seed); keep = set(rs.permutation(len(keys))[:max(1, int(round(frac * len(keys))))])
+        keys = [kk for i, kk in enumerate(keys) if i in keep]
     for p in paths:
         with h5py.File(p, "r", locking=False) as f:
             for k in f:
-                if k == "controller" or "truth_tau" not in f[k]: continue
+                if (p, k) not in keys: continue
                 g = f[k]; a = lambda n: g[n][:].T
                 q, dq, qm, dqm, tau = a("truth_q"), a("truth_dq"), a("truth_qm"), a("truth_dqm"), a("truth_tau")
                 ddq, ddqm = np.gradient(dq, DT8, axis=0), np.gradient(dqm, DT8, axis=0)
@@ -35,9 +43,10 @@ def main():
     ap.add_argument("--data", nargs="+", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stride", type=int, default=4, help="8 kHz から間引く間隔")
+    ap.add_argument("--frac", type=float, default=1.0, help="使うシナリオの割合（データ量の軸、issue #101）"); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--bv-nonneg", action="store_true", help="粘性摩擦 Bv を 0 以上に制約（負になった軸を 0 に固定して解き直す）")
     a = ap.parse_args()
-    D = load(a.data, a.stride); N = len(D["q"]); print(f"行数 {N}")
+    D = load(a.data, a.stride, frac=a.frac, seed=a.seed); N = len(D["q"]); print(f"行数 {N}")
     el = json.load(open("data/export/elastic20.json")); P = json.load(open("data/export/c8_params.json"))
     k0, c0, J0 = (np.ravel(el[x])[:6] for x in ("k", "c", "Jm"))
     Fc0, Bv0, eps = (np.ravel(P[x])[:6] for x in ("frictionFc", "frictionBv", "frictionEps"))

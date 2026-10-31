@@ -131,11 +131,39 @@ def _mass_bias(q, dq, R0, pj, mass, com, Ic, g0):
 
 
 @njit(cache=True)
-def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps):
+def _resid(th, dth, dq, R):
+    """残差トルク NN（issue #101）: 軸ごとの MLP [θ, dθ, dq] → (Δs ばねの非線形分, Δf 摩擦の非線形分)。R = (use, W0, b0, W1, b1, W2, b2, xs, ys)。"""
+    n = 6
+    ds = np.zeros(n); df = np.zeros(n)
+    if R[0] == 0:
+        return ds, df
+    W0, b0, W1, b1, W2, b2, xs, ys = R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8]
+    H = b0.shape[1]
+    for i in range(n):
+        x0 = th[i] / xs[i, 0]; x1 = dth[i] / xs[i, 1]; x2 = dq[i] / xs[i, 2]
+        h1 = np.empty(H)
+        for a in range(H):
+            h1[a] = np.tanh(W0[i, a, 0] * x0 + W0[i, a, 1] * x1 + W0[i, a, 2] * x2 + b0[i, a])
+        h2 = np.empty(H)
+        for a in range(H):
+            acc = b1[i, a]
+            for b in range(H):
+                acc += W1[i, a, b] * h1[b]
+            h2[a] = np.tanh(acc)
+        o0 = b2[i, 0]; o1 = b2[i, 1]
+        for b in range(H):
+            o0 += W2[i, 0, b] * h2[b]; o1 += W2[i, 1, b] * h2[b]
+        ds[i] = o0 * ys[i, 0]; df[i] = o1 * ys[i, 1]
+    return ds, df
+
+
+@njit(cache=True)
+def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R):
     n = 6
     q, dq, qm, dqm = y[:n], y[n:2 * n], y[2 * n:3 * n], y[3 * n:]
-    ts = k * (qm - q) + c * (dqm - dq)
-    rhs = ts - gb - (Bv * dq + Fc * np.tanh(dq / eps))
+    ds, df = _resid(qm - q, dqm - dq, dq, R)
+    ts = k * (qm - q) + c * (dqm - dq) + ds
+    rhs = ts - gb - (Bv * dq + Fc * np.tanh(dq / eps) + df)
     out = np.empty(4 * n)
     out[:n] = dq
     out[n:2 * n] = _lu_solve(MLU, Mpiv, rhs)
@@ -145,7 +173,7 @@ def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps):
 
 
 @njit(cache=True)
-def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc, eps):
+def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc, eps, R):
     """1 行の ROS2（frozen=0 は twomass.TwoMass._step と同じ）。y: [24]。
     frozen=1: M(q) と g+b を 1 ms の始点で 1 回だけ計算し、サブステップ内で使い回す（RNEA 8 回/ms。q の変化は 1 ms で小さい）。"""
     n = 6
@@ -177,7 +205,7 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
             J[3 * n + i, 3 * n + i] = -c[i] / Jm[i]
         W = I24 - gam * h * J
         WLU, Wpiv = _lu(W)
-        f0 = _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps)
+        f0 = _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R)
         k1 = _lu_solve(WLU, Wpiv, f0)
         y1 = y + h * k1
         if frozen == 0:
@@ -185,14 +213,23 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
             M1LU, M1piv = _lu(M1)
         else:
             gb1 = gb; M1LU = MLU; M1piv = Mpiv
-        f1 = _f(y1, tau, M1LU, M1piv, gb1, k, c, Jm, Bv, Fc, eps)
+        f1 = _f(y1, tau, M1LU, M1piv, gb1, k, c, Jm, Bv, Fc, eps, R)
         k2 = _lu_solve(WLU, Wpiv, f1 - 2.0 * k1)
         y = y + 1.5 * h * k1 + 0.5 * h * k2
     return y
 
 
+def _load_residual(path):
+    z1 = np.zeros((6, 1, 3)); z = np.zeros((6, 1))
+    if path is None:
+        return (0, z1, z, np.zeros((6, 1, 1)), z, np.zeros((6, 2, 1)), np.zeros((6, 2)), np.ones((6, 3)), np.ones((6, 2)))
+    d = np.load(path)
+    st = lambda key: np.stack([d[f"{key}_{i}"] for i in range(6)]).astype(float)
+    return (1, st("W0"), st("b0"), st("W1"), st("b1"), st("W2"), st("b2"), st("xs"), st("ys"))
+
+
 class TwoMassNB:
-    def __init__(self, params_json, elastic_json, dt=1e-3, substeps=8, frozen=0, scale=None):
+    def __init__(self, params_json, elastic_json, dt=1e-3, substeps=8, frozen=0, scale=None, residual=None):
         """scale: パラメータ倍率 {k, c, Jm, fric（Fc と Bv）, Fc, Bv, mass（全リンクの質量・慣性）}（twomass.TwoMass と同じ。issue #95）。"""
         self.scale = dict(scale or {})
         self.params_json, self.dt, self.substeps, self.frozen = params_json, dt, substeps, frozen
@@ -203,6 +240,7 @@ class TwoMassNB:
         import torch
         self.Jm = torch.from_numpy(self.Jm_np.copy())          # closed_loop_el が参照する（torch）
         self._consts, self._payload = {}, 0.0
+        self.R = _load_residual(residual)                         # 残差トルク NN（issue #101、fit_residual_el.py の residual.npz）
 
     @property
     def payload(self):
@@ -226,7 +264,7 @@ class TwoMassNB:
 
     def step_np(self, y, tau):
         """y: [24]、tau: [6]（numpy）→ [24]。逐次の計測用（変換なし）。"""
-        return _step1(y, tau, self.dt / self.substeps, self.substeps, self.frozen, *self.consts())
+        return _step1(y, tau, self.dt / self.substeps, self.substeps, self.frozen, *self.consts(), self.R)
 
     def step(self, q, dq, qm, dqm, tau):
         is_t = hasattr(q, "numpy")
@@ -235,7 +273,7 @@ class TwoMassNB:
         cs = self.consts(); h = self.dt / self.substeps
         out = np.empty_like(Y)
         for b in range(Y.shape[0]):
-            out[b] = _step1(Y[b], T[b], h, self.substeps, self.frozen, *cs)
+            out[b] = _step1(Y[b], T[b], h, self.substeps, self.frozen, *cs, self.R)
         if is_t:
             import torch
             out = torch.from_numpy(out)
