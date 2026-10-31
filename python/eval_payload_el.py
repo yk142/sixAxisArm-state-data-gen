@@ -57,6 +57,7 @@ def main():
     ap.add_argument("--twomass", type=int, default=0, help="2 慣性の解析モデル（issue #77）を追加する。値はサブステップ数（0 で無効、推奨 8）")
     ap.add_argument("--perturb", nargs="*", default=[], help="2 慣性のパラメータ倍率の組（例 k=1.2 c=0.5,Jm=1.1）。issue #81")
     ap.add_argument("--bmodels", nargs="*", default=[], help="B 型（2 慣性 + 残差 NN）のモデルディレクトリ（issue #85）")
+    ap.add_argument("--twomass-nb", nargs="*", default=[], help="numba 版 2 慣性解析（issue #91）。'サブステップ:凍結' の組（例 8:0 8:1 4:1）")
     ap.add_argument("--pt-sub", type=int, default=8, help="--perturb のサブステップ数")
     ap.add_argument("--groups", nargs="*", default=None, help="評価するグループ名の接頭辞/部分文字列（例 pl0_ pl8_）")
     ap.add_argument("--data", nargs="+", default=["data/export/payload_eval6_el20.h5"], help="真値の HDF5（複数可。グループ名が重なれば先のファイルを優先）")
@@ -79,6 +80,10 @@ def main():
     if a.twomass:
         from sa_nsm.twomass import TwoMass
         plants[f"2慣性解析（sub{a.twomass}）"] = TwoMass("data/export/c8_params.json", "data/export/elastic20.json", substeps=a.twomass)
+    for spec in a.twomass_nb:
+        from sa_nsm.twomass_nb import TwoMassNB
+        sub, fz = (int(x) for x in spec.split(":"))
+        plants[f"2慣性 numba sub{sub}" + ("（M 凍結）" if fz else "")] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz)
     for p in a.bmodels:
         pl = BPlant(p, a.pt_sub); pl.dq_max, pl.tau_max = torch.as_tensor(dq_max), torch.as_tensor(tau_max)
         plants[f"B型（{os.path.basename(p)}）"] = pl
