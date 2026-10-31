@@ -34,6 +34,7 @@ def main():
     ap.add_argument("--ref", nargs="*", default=None, help="もう一つの真値（許容誤差違い）。複数ファイル可。同名のシナリオを比べる")
     ap.add_argument("--twomass-nb", nargs="*", default=[], help="'サブステップ:凍結' の組")
     ap.add_argument("--perturb", nargs="*", default=[], help="パラメータ倍率の組（例 fric=1.01 mass=0.97,k=1.1）。numba sub4・M 凍結で評価（issue #95）")
+    ap.add_argument("--scale-json", nargs="*", default=[], help="identify_el.py の出力（倍率、軸ごと）。numba 2 慣性解析に与えて評価（issue #99）")
     ap.add_argument("--pt-spec", default="4:1", help="--perturb のサブステップ:凍結")
     ap.add_argument("--iters", type=int, default=1)
     ap.add_argument("--out", required=True)
@@ -51,6 +52,11 @@ def main():
         sub, fz = (int(x) for x in a.pt_spec.split(":"))
         sc_ = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in pt.split(",")}
         plants[f"2慣性 {pt}"] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, scale=sc_)
+    for sj in a.scale_json:
+        from sa_nsm.twomass_nb import TwoMassNB
+        sub, fz = (int(x) for x in a.pt_spec.split(":"))
+        sc_ = {k: np.asarray(v, float) for k, v in json.load(open(sj))["scale"].items()}
+        plants[f"2慣性 同定（{os.path.basename(os.path.dirname(sj))}/{os.path.basename(sj)}）"] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, scale=sc_)
     res, tim = [], []
     def load(paths):
         out = {}
@@ -79,7 +85,7 @@ def main():
                 pm = kin.tip_pos(qs[i])
                 d = np.linalg.norm(pm - pt, axis=1) * 1e3                      # mm
                 row[pn] = {"end_mm": float(d[e]), "last50_max_mm": float(d[max(b, e - 50):e + 1].max()),
-                           "joint_end_deg": np.abs(qs[i][e] - s.q[e]).tolist()}
+                           "joint_end_deg": np.rad2deg(np.abs(qs[i][e] - s.q[e])).tolist()}
             row["truth_resid_mm"] = float(np.linalg.norm(pt[e] - kin.tip_pos(s.q_ref[e])) * 1e3)    # 真値の、参照に対する残差（参考）
             res.append(row)
     os.makedirs(a.out, exist_ok=True)
