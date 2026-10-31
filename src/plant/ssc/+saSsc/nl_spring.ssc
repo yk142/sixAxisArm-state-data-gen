@@ -13,7 +13,7 @@ component nl_spring
   end
   variables
     t   = {0, 'N*m'};
-    phi = {value = {0, 'rad'}, priority = priority.none};   % ねじれ角（初期 0）
+    phi = {value = {0, 'rad'}, priority = priority.high};   % ねじれ角（初期 0 を必ず守る。priority.none にすると初期化で任意の値が入り、ばねの中立点がずれた: issue #99）
   end
   branches
     t : R.t -> C.t;
