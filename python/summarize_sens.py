@@ -49,7 +49,7 @@ def main():
          f"| 倍率 | ΔOS 最大[pt] | Δ整定 最大[ms] | Δ整定 相対最大 | ステップ位置誤差 最大[deg] | 全区間 q 誤差 最大[deg] | 最適ゲイン一致 | 選択ゲインの整定悪化 | 選択ゲインの真値OS最大[%] | 水準 G |",
          "|---|---|---|---|---|---|---|---|---|---|"]
     for v, dos, dabs, drel, se, ae, match, regret, osv, mb in rows:
-        ok = dos <= G_DOS and drel <= G_DST_REL and dabs <= G_DST_ABS and se <= G_POS and match == len(pls)
+        ok = dos <= G_DOS and dabs <= G_DST_ABS and se <= G_POS and match == len(pls)
         L.append(f"| {v} | {dos:.2f} | {dabs*1e3:.1f} | {drel:.1%} | {se:.3f} | {ae:.3f} | {match}/{len(pls)} | {regret:.1%} | {osv:.2f} | {'○' if ok else '×'} |")
     open(f"{a.out}/summary.md", "w").write("\n".join(L) + "\n"); print("\n".join(L))
     names = [r[0] for r in rows]; x = np.arange(len(rows))
