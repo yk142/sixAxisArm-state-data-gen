@@ -1,20 +1,25 @@
-function sa_export_ptp_el(outFile, tol, names)
+function sa_export_ptp_el(outFile, tol, names, unmodeled)
 %SA_EXPORT_PTP_EL 弾性真値の PTP（ペイロード 0 kg、12 本）を HDF5 に書く（issue #93、位置決め精度の評価用）。
 %   sa_export_ptp_el('data/export/ptp_el.h5')                      キャッシュ（data/cache/fullel6_*.mat）から書く（Simscape は再実行しない）
 %   sa_export_ptp_el('data/export/ptp_el_tight.h5', struct('RelTol',1e-9,'AbsTol',1e-11))   許容誤差を変えて Simscape を再実行して書く
 %   tol.RelTol / tol.AbsTol / tol.MaxStep（省略で既定 1e-6 / 1e-8 / 1/8 kHz）。names で本数を絞れる（例 {'ptp_v20_001'}）
+%   unmodeled（issue #97）: 解析モデルの式にない効果（addSaUnmodeled の um。struct() で既定値）。指定すると必ず Simscape を再実行する（tol は [] で既定の許容誤差）
 %   形式は sa_export_eval_el と同じ（ref、tau_d、truth_q / dq / qm / dqm を 8 kHz、controller）。属性に許容誤差と計算時間
 repo = fileparts(fileparts(mfilename('fullpath')));
 if ~startsWith(outFile, filesep), outFile = fullfile(pwd, outFile); end
 addpath(fullfile(repo,'config'), genpath(fullfile(repo,'src')));
 if nargin < 2, tol = []; end
+if nargin < 4, unmodeled = []; end
+simRun = ~isempty(tol) || ~isempty(unmodeled);
 S = saScenarioSetPayload(6,'full',0,[]);  S = S(strcmp({S.type},'ptp'));
 if nargin >= 3 && ~isempty(names), S = S(ismember({S.name}, names)); end
 if exist(outFile,'file'), delete(outFile); end
 mdl = '';
-if ~isempty(tol)
+if simRun
     workDir = tempname;  mkdir(workDir);  oldDir = cd(workDir);  cl = onCleanup(@() cd(oldDir)); %#ok<NASGU>
     oc = struct('modelName','sa_closed6_ptptol','slxPath',fullfile(workDir,'sa_closed6_ptptol.slx'),'payload',struct('mass',0),'elastic',struct());
+    if ~isempty(unmodeled), oc.unmodeled = unmodeled; end
+    if isempty(tol), tol = struct(); end
     mdl = buildSaClosedLoop(6, oc);
     c = sa_config();
     rt = '1e-6'; at = '1e-8'; ms = num2str(1/c.fsSim,'%.12g');
@@ -22,7 +27,7 @@ if ~isempty(tol)
     if isfield(tol,'AbsTol'), at = num2str(tol.AbsTol,'%.12g'); end
     if isfield(tol,'MaxStep'), ms = num2str(tol.MaxStep,'%.12g'); end
     set_param(mdl,'RelTol',rt,'AbsTol',at,'MaxStep',ms);
-    fprintf('Simscape 再実行: RelTol %s AbsTol %s MaxStep %s（solver %s）\n', get_param(mdl,'RelTol'), get_param(mdl,'AbsTol'), get_param(mdl,'MaxStep'), get_param(mdl,'Solver'));
+    fprintf('Simscape 再実行（unmodeled=%d）: RelTol %s AbsTol %s MaxStep %s（solver %s）\n', ~isempty(unmodeled), get_param(mdl,'RelTol'), get_param(mdl,'AbsTol'), get_param(mdl,'MaxStep'), get_param(mdl,'Solver'));
 end
 for i = 1:numel(S)
     s = S(i);  t0 = tic;  g = ['/' s.name];

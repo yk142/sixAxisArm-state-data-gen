@@ -12,10 +12,10 @@ SPEED_KEY = {"2慣性 numba sub8": "2慣性解析 numba sub8", "2慣性 numba su
              "2慣性 numba sub4": "2慣性解析 numba sub4", "2慣性 numba sub4（M 凍結）": "2慣性解析 numba sub4（M 凍結）"}
 
 
-def main(out="reports/issue-93"):
+def main(src="data/eval/ptp93", out="reports/issue-93", title="PTP の位置決め後の先端誤差（Simscape 弾性真値との差）"):
     os.makedirs(out, exist_ok=True)
     E = {}
-    for f in sorted(glob.glob("data/eval/ptp93/*/ptp_pos.json")):
+    for f in sorted(glob.glob(f"{src}/*/ptp_pos.json")):
         R = json.load(open(f))
         for k in R[0]:
             if isinstance(R[0][k], dict):
@@ -34,8 +34,14 @@ def main(out="reports/issue-93"):
     names = list(E)
     ax.boxplot([np.maximum(E[k][0], 1e-9) for k in names], vert=False, labels=names, whis=(0, 100))
     ax.axvline(P02, color="r", ls="--", label="水準 P02（0.02 mm）"); ax.set_xscale("log"); ax.set_xlabel("停留の終わりの先端誤差 [mm]（48 回）")
-    ax.grid(alpha=.3, which="both", axis="x"); ax.legend(loc="lower right"); ax.set_title("PTP の位置決め後の先端誤差（Simscape 弾性真値との差）")
+    ax.grid(alpha=.3, which="both", axis="x"); ax.legend(loc="lower right"); ax.set_title(title)
     fig.tight_layout(); fig.savefig(f"{out}/ptp_pos.png", dpi=110)
 
 
-main()
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--src", default="data/eval/ptp93"); ap.add_argument("--out", default="reports/issue-93")
+    ap.add_argument("--title", default="PTP の位置決め後の先端誤差（Simscape 弾性真値との差）")
+    a = ap.parse_args(); main(a.src, a.out, a.title)

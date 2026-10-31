@@ -4,3 +4,4 @@ slprj/
 __pycache__/
 .pytest_cache/
 *.pyc
+src/plant/ssc/saSsc_lib.slx

@@ -30,8 +30,8 @@ def dwells(dq_ref, min_len=100):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", required=True, help="真値（比較の基準）")
-    ap.add_argument("--ref", default=None, help="もう一つの真値（許容誤差違い）。指定するとモデルの代わりにこれを比べる")
+    ap.add_argument("--data", nargs="+", required=True, help="真値（比較の基準）。複数ファイル可")
+    ap.add_argument("--ref", nargs="*", default=None, help="もう一つの真値（許容誤差違い）。複数ファイル可。同名のシナリオを比べる")
     ap.add_argument("--twomass-nb", nargs="*", default=[], help="'サブステップ:凍結' の組")
     ap.add_argument("--perturb", nargs="*", default=[], help="パラメータ倍率の組（例 fric=1.01 mass=0.97,k=1.1）。numba sub4・M 凍結で評価（issue #95）")
     ap.add_argument("--pt-spec", default="4:1", help="--perturb のサブステップ:凍結")
@@ -52,14 +52,19 @@ def main():
         sc_ = {kv.split("=")[0]: float(kv.split("=")[1]) for kv in pt.split(",")}
         plants[f"2慣性 {pt}"] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, scale=sc_)
     res, tim = [], []
-    with h5py.File(a.data, "r") as f:
-        ctl = load_controller(f)
-        names = sorted(k for k in f if k != "controller")
-        sc = [Scenario(f[k], ctl) for k in names]
+    def load(paths):
+        out = {}
+        for pth in paths:
+            with h5py.File(pth, "r") as f:
+                c = load_controller(f)
+                out.update({k: Scenario(f[k], c) for k in f if k != "controller"})
+        return out, c
+    D, ctl = load(a.data)
+    names = sorted(D); sc = [D[k] for k in names]
     q_by = {}
     if a.ref:
-        with h5py.File(a.ref, "r") as f:
-            q_by["真値（--ref）"] = [Scenario(f[k], ctl).q for k in names]
+        Rf, _ = load(a.ref)
+        q_by["真値（--ref）"] = [Rf[k].q for k in names]
     for pn, pl in plants.items():
         pl.payload = 0.0; t0 = time.time()
         q = closed_loop_el(pl, sc, ctl, iters=a.iters)[0]
