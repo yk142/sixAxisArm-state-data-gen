@@ -37,6 +37,7 @@ def main():
     ap.add_argument("--scale-json", nargs="*", default=[], help="identify_el.py の出力（倍率、軸ごと）。numba 2 慣性解析に与えて評価（issue #99）")
     ap.add_argument("--hybrid", nargs="*", default=[], help="'同定 JSON,残差 npz' の組。④ ハイブリッド（issue #101）")
     ap.add_argument("--oracle", nargs="*", default=[], help="'サブステップ:凍結[:all|spring|stribeck[:nojac]]'（nojac: 効果の微分をヤコビアンに入れない＝④ と同じ扱い）。真値に入れたモデル外の効果の式をそのまま足した 2 慣性解析（公称パラメータ、issue #103）")
+    ap.add_argument("--pure", nargs="*", default=[], help="fit_pure_el.py の pure.npz。③ 純 NN（issue #111）。サブステップは --pt-spec")
     ap.add_argument("--hybrid-spec", nargs="*", default=[], help="--hybrid を評価するサブステップ:凍結の組（省略時は --pt-spec）")
     ap.add_argument("--pt-spec", default="4:1", help="--perturb のサブステップ:凍結")
     ap.add_argument("--iters", type=int, default=1)
@@ -68,6 +69,10 @@ def main():
             sub, fz = (int(x) for x in spec.split(":"))
             sfx = f" sub{sub}" + ("（M 凍結）" if fz else "") if a.hybrid_spec else ""
             plants[f"④ ハイブリッド（{os.path.basename(os.path.dirname(npz))}）{sfx}"] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, scale=sc_, residual=npz)
+    for pu in a.pure:
+        from sa_nsm.pure_nb import PureNB
+        sub = int(a.pt_spec.split(":")[0])
+        plants[f"③ 純 NN（{os.path.basename(os.path.dirname(pu))}）"] = PureNB(pu, substeps=sub)
     for spec in a.oracle:
         from sa_nsm.twomass_nb import TwoMassNB
         sp = spec.split(":"); sub, fz = int(sp[0]), int(sp[1]); part = sp[2] if len(sp) > 2 else "all"

@@ -29,5 +29,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Phase 0〜4 完了（#1〜#85）。真値は弾性つき Simscape（#71）、比較基準は 2 慣性解析（`python/sa_nsm/twomass.py`、numba 版 `twomass_nb.py`）。
 - Phase 5（docs/plan.md）: 目標は「手先の繰り返し精度 ±0.02 mm（水準 P02、PTP の位置決め後の先端誤差）を、逐次で実時間より速く計算できる手法」。真値にモデル外の効果（硬化ばね・Stribeck、#97）を入れ、① 公称 / ② 同定 / ④ ハイブリッド（同定＋残差トルク NN）を比べている。
   - #105: ④（残差 NN 3 つのアンサンブル、sub2・M 凍結）が P-bench v1 で P02 を満たす（1 ms あたり 0.45 ms）。#107: 外挿ベンチ X-bench（速度・ペイロード・ゲイン・姿勢）。
-  - #109: 残差 NN をばね・摩擦に分け、ペイロード 4 kg のデータを残差の学習に足すと X-bench 38/39・P-bench 48/48（1 ms あたり 0.46 ms）。次は ③ 純 NN との比較。
+  - #109: 残差 NN をばね・摩擦に分け、ペイロード 4 kg のデータを残差の学習に足すと X-bench 38/39・P-bench 48/48（1 ms あたり 0.46 ms）。
+  - #111: ③ 純 NN（物理の式なし）は P-bench 中央値 3.7 mm で ② にも届かない（静止時のつり合いを学べない）。順位は ③ < ① < ② < ④。
 - MATLAB: `src/`・`config/`・`tools/`・`test/`。Python: `python/`（venv `~/.venvs/sa-train`）。データは `data/`（git 管理外）。
