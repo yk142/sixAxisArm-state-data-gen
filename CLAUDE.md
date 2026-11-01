@@ -31,4 +31,5 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - #105: ④（残差 NN 3 つのアンサンブル、sub2・M 凍結）が P-bench v1 で P02 を満たす（1 ms あたり 0.45 ms）。#107: 外挿ベンチ X-bench（速度・ペイロード・ゲイン・姿勢）。
   - #109: 残差 NN をばね・摩擦に分け、ペイロード 4 kg のデータを残差の学習に足すと X-bench 38/39・P-bench 48/48（1 ms あたり 0.46 ms）。
   - #111: ③ 純 NN（物理の式なし）は P-bench 中央値 3.7 mm で ② にも届かない（静止時のつり合いを学べない）。順位は ③ < ① < ② < ④。
+  - #113: 測定を実機に近づけると、P02 を失う主因はトルクのゲイン誤差（0.5% で崩れる）。質量既知のペイロードによる校正で戻る（P-bench 46/48）。次はリンク側の角度なしの同定。
 - MATLAB: `src/`・`config/`・`tools/`・`test/`。Python: `python/`（venv `~/.venvs/sa-train`）。データは `data/`（git 管理外）。
