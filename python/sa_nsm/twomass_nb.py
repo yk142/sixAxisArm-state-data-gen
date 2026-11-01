@@ -179,13 +179,14 @@ def _oracle(th, dq, U):
 
 
 @njit(cache=True)
-def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R, U):
+def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, k3, R, U):
     n = 6
     q, dq, qm, dqm = y[:n], y[n:2 * n], y[2 * n:3 * n], y[3 * n:]
     ds, df = _resid(qm - q, dqm - dq, dq, R)
     os_, of, _, _ = _oracle(qm - q, dq, U)
     ds = ds + k * os_; df = df + of
-    ts = k * (qm - q) + c * (dqm - dq) + ds
+    th = qm - q
+    ts = k * th + k3 * th ** 3 + c * (dqm - dq) + ds
     rhs = ts - gb - (Bv * dq + Fc * np.tanh(dq / eps) + df)
     out = np.empty(4 * n)
     out[:n] = dq
@@ -196,7 +197,7 @@ def _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R, U):
 
 
 @njit(cache=True)
-def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc, eps, R, U):
+def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc, eps, k3, R, U):
     """1 行の ROS2（frozen=0 は twomass.TwoMass._step と同じ）。y: [24]。
     frozen=1: M(q) と g+b を 1 ms の始点で 1 回だけ計算し、サブステップ内で使い回す（RNEA 8 回/ms。q の変化は 1 ms で小さい）。"""
     n = 6
@@ -216,7 +217,7 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
         _, _, dds, ddf = _oracle(y[2 * n:3 * n] - q, dq, U)       # 正解の式の微分（issue #103。U 無効なら 0）
         if U[0] != 0 and U[1][2] == 0.0:                             # 微分を J に入れない（④ の残差 NN と同じ扱い）
             dds = np.zeros(n); ddf = np.zeros(n)
-        ke = k * (1.0 + dds); Dfr = Dfr + np.maximum(ddf, 0.0)
+        ke = k * (1.0 + dds) + 3.0 * k3 * (y[2 * n:3 * n] - q) ** 2; Dfr = Dfr + np.maximum(ddf, 0.0)
         # Stribeck の負の傾きはヤコビアンに入れない: J に正の固有値 λ ができ、γ·h·λ ≈ 1 で W = I − γhJ が特異になって発散した（sub8 で 48 回中 24 回 NaN）
         J = np.zeros((4 * n, 4 * n))
         for i in range(n):
@@ -233,7 +234,7 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
             J[3 * n + i, 3 * n + i] = -c[i] / Jm[i]
         W = I24 - gam * h * J
         WLU, Wpiv = _lu(W)
-        f0 = _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, R, U)
+        f0 = _f(y, tau, MLU, Mpiv, gb, k, c, Jm, Bv, Fc, eps, k3, R, U)
         k1 = _lu_solve(WLU, Wpiv, f0)
         y1 = y + h * k1
         if frozen == 0:
@@ -241,7 +242,7 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
             M1LU, M1piv = _lu(M1)
         else:
             gb1 = gb; M1LU = MLU; M1piv = Mpiv
-        f1 = _f(y1, tau, M1LU, M1piv, gb1, k, c, Jm, Bv, Fc, eps, R, U)
+        f1 = _f(y1, tau, M1LU, M1piv, gb1, k, c, Jm, Bv, Fc, eps, k3, R, U)
         k2 = _lu_solve(WLU, Wpiv, f1 - 2.0 * k1)
         y = y + 1.5 * h * k1 + 0.5 * h * k2
     return y
@@ -291,7 +292,8 @@ class TwoMassNB:
             g = lambda key: self.scale.get(key, 1.0)
             ms = g("mass")
             self._consts[m] = (n(a.R0), n(a.pj), n(a.mass) * ms, n(a.com), n(a.Ic) * ms, g0, self.k, self.c, self.Jm_np,
-                               n(a.Bv) * g("fric") * g("Bv"), n(a.Fc) * g("fric") * g("Fc"), n(a.eps))
+                               n(a.Bv) * g("fric") * g("Bv"), n(a.Fc) * g("fric") * g("Fc"), n(a.eps),
+                               np.asarray(self.scale.get("k3", np.zeros(6)), float) * np.ones(6))      # θ³ の係数（issue #109、同定の scale.k3。無ければ 0）
         return self._consts[m]
 
     def _U(self):

@@ -18,7 +18,7 @@ DT8 = 1.0 / 8000
 
 def load(paths, stride, frac=1.0, seed=0):
     """frac < 1: シナリオ単位で無作為に frac の割合だけ使う（データ量の軸、issue #101）。"""
-    X = {k: [] for k in ("q", "dq", "qm", "dqm", "tau", "ddq", "ddqm")}
+    X = {k: [] for k in ("q", "dq", "qm", "dqm", "tau", "ddq", "ddqm", "pl")}
     keys = []
     for p in paths:
         with h5py.File(p, "r", locking=False) as f:
@@ -34,8 +34,28 @@ def load(paths, stride, frac=1.0, seed=0):
                 q, dq, qm, dqm, tau = a("truth_q"), a("truth_dq"), a("truth_qm"), a("truth_dqm"), a("truth_tau")
                 ddq, ddqm = np.gradient(dq, DT8, axis=0), np.gradient(dqm, DT8, axis=0)
                 sl = slice(8, len(q) - 8, stride)                      # 端の差分を除く
-                for n, v in zip(X, (q, dq, qm, dqm, tau, ddq, ddqm)): X[n].append(v[sl])
-    return {k: np.concatenate(v) for k, v in X.items()}
+                pl = float(np.ravel(g.attrs.get("payload", 0.0))[0])        # 手先ペイロード [kg]（issue #109）
+                for n, v in zip(X, (q, dq, qm, dqm, tau, ddq, ddqm, np.full((len(q), 1), pl))): X[n].append(v[sl])
+    D = {k: np.concatenate(v) for k, v in X.items()}
+    D["pl"] = D["pl"][:, 0]
+    return D
+
+
+def rigid(D, mass=1.0):
+    """M(q)·ddq + g + b（armature なし）。行ごとのペイロード D["pl"] に合わせる（issue #109）。
+    mass: 質量・慣性の倍率（ペイロード込みの全リンクに掛ける。同定の s·rig、TwoMassNB の scale.mass と同じ扱い）。"""
+    rig = np.zeros_like(D["q"])
+    for m in np.unique(D["pl"]):
+        arm = Arm.from_json("data/export/c8_params.json", 6, float(m)); arm.armature = torch.zeros_like(arm.armature)
+        if mass != 1.0:
+            arm.mass, arm.Ic = arm.mass * mass, arm.Ic * mass
+        idx = np.where(D["pl"] == m)[0]
+        for s in range(0, len(idx), 50000):
+            j = idx[s:s + 50000]
+            q, dq, ddq = (torch.from_numpy(D[n][j]) for n in ("q", "dq", "ddq"))
+            with torch.no_grad():
+                rig[j] = arm.rnea(q, dq, ddq).numpy()
+    return rig
 
 
 def main():
@@ -45,26 +65,24 @@ def main():
     ap.add_argument("--stride", type=int, default=4, help="8 kHz から間引く間隔")
     ap.add_argument("--frac", type=float, default=1.0, help="使うシナリオの割合（データ量の軸、issue #101）"); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--bv-nonneg", action="store_true", help="粘性摩擦 Bv を 0 以上に制約（負になった軸を 0 に固定して解き直す）")
+    ap.add_argument("--cubic", action="store_true", help="モータ側の式に θ³ を足す（硬化ばね、issue #109）。出力 scale.k3 [N·m/rad³]（絶対値）")
     a = ap.parse_args()
     D = load(a.data, a.stride, frac=a.frac, seed=a.seed); N = len(D["q"]); print(f"行数 {N}")
     el = json.load(open("data/export/elastic20.json")); P = json.load(open("data/export/c8_params.json"))
     k0, c0, J0 = (np.ravel(el[x])[:6] for x in ("k", "c", "Jm"))
     Fc0, Bv0, eps = (np.ravel(P[x])[:6] for x in ("frictionFc", "frictionBv", "frictionEps"))
     th, dth = D["qm"] - D["q"], D["dqm"] - D["dq"]
-    res = {"k": [], "c": [], "Jm": []}; fit = {}
+    res = {"k": [], "c": [], "Jm": []} | ({"k3": []} if a.cubic else {}); fit = {}
     Jm = np.zeros(6)
     for i in range(6):                                                    # モータ側
-        A = np.stack([D["ddqm"][:, i], th[:, i], dth[:, i]], 1)
+        cols = [D["ddqm"][:, i], th[:, i], dth[:, i]] + ([th[:, i] ** 3] if a.cubic else [])
+        A = np.stack(cols, 1)
         x, *_ = np.linalg.lstsq(A, D["tau"][:, i], rcond=None)
         Jm[i] = x[0]; res["Jm"].append(x[0] / J0[i]); res["k"].append(x[1] / k0[i]); res["c"].append(x[2] / c0[i])
+        if a.cubic: res["k3"].append(x[3])
         r = D["tau"][:, i] - A @ x; fit[f"motor_{i+1}_rms_Nm"] = float(np.sqrt((r ** 2).mean()))
     ts = D["tau"] - Jm * D["ddqm"]                                         # ばね＋ダンパのトルク（リンク側に伝わる）
-    arm = Arm.from_json("data/export/c8_params.json", 6, 0.0); arm.armature = torch.zeros_like(arm.armature)
-    rig = np.zeros_like(ts)
-    for s in range(0, N, 50000):
-        q, dq, ddq = (torch.from_numpy(D[n][s:s + 50000]) for n in ("q", "dq", "ddq"))
-        with torch.no_grad():
-            rig[s:s + 50000] = arm.rnea(q, dq, ddq).numpy()               # M·ddq + g + b（armature なし）
+    rig = rigid(D)                                                         # M·ddq + g + b（armature なし、ペイロード込み）
     # リンク側: 全軸まとめて [s（共通）, Bv_i, Fc_i]
     cols = 1 + 12; A = np.zeros((N * 6, cols)); y = ts.reshape(-1, order="F")
     for i in range(6):
