@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from identify_el import load, rigid
+from identify_el import load, rigid, parse_meas, tcal
 
 
 def residuals(D, scale):
@@ -82,13 +82,15 @@ def main():
     ap.add_argument("--stride", type=int, default=4); ap.add_argument("--frac", type=float, default=1.0, help="使うシナリオの割合（データ量の軸）")
     ap.add_argument("--width", type=int, default=32); ap.add_argument("--iters", type=int, default=4000); ap.add_argument("--lr", type=float, default=3e-3)
     ap.add_argument("--seed", type=int, default=0); ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--meas", default="", help="測定の模擬（issue #113、identify_el.parse_meas）")
+    ap.add_argument("--tcal", default="", help="トルクのゲイン校正 JSON（calib_gain.py）")
     ap.add_argument("--dq-eps", action="store_true", help="dq の尺度を ε にする（既定は標準偏差）")
     ap.add_argument("--tanh-feat", action="store_true", help="入力に tanh(dq/ε) を足す")
     ap.add_argument("--wlow", type=float, default=0.0, help="低速の重み")
     ap.add_argument("--split", action="store_true", help="ばね（θ, dθ）と摩擦（dq, tanh）を別の NN にする（issue #109）")
     a = ap.parse_args()
     torch.set_num_threads(a.threads); torch.manual_seed(a.seed); rng = np.random.RandomState(a.seed)
-    D = load(a.data, a.stride, frac=a.frac, seed=a.seed)
+    D = tcal(load(a.data, a.stride, frac=a.frac, seed=a.seed, meas=parse_meas(a.meas)), a.tcal)
     th, dth, rm, rl = residuals(D, json.load(open(a.ident))["scale"])
     N = len(th); print(f"行数 {N}（frac {a.frac}）", flush=True)
     idx = rng.permutation(N); nv = N // 10; vi, ti = idx[:nv], idx[nv:]
