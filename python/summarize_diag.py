@@ -59,7 +59,7 @@ def main(out="reports/issue-103"):
     f6 = lambda x: np.ravel(x)[:6].astype(float)
     Fc0, Bv0, ep = f6(P["frictionFc"]), f6(P["frictionBv"]), f6(P["frictionEps"]); k0 = f6(el["k"])
     m = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=4, frozen=1, scale=sc, residual=NPZ)
-    _, _, _, _, _, _, kI, _, _, BvI, FcI, _ = m.consts()
+    _, _, _, _, _, _, kI, _, _, BvI, FcI, _ = m.consts()[:12]
     axes = (3, 5)
     fig, ax = plt.subplots(2, 3, figsize=(15, 8))
     e_or = rows[1][3]; e_hy = rows[8][3]

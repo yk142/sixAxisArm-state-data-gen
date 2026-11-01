@@ -11,8 +11,9 @@ def main():
     ap.add_argument("--in", dest="inp", nargs="+", required=True); ap.add_argument("--out", required=True)
     a = ap.parse_args()
     Ds = [np.load(f"{p}/residual.npz") for p in a.inp]; K = len(Ds)
-    out = {"width": sum(int(d["width"]) for d in Ds), "blk": int(Ds[0]["width"])}
-    assert all(int(d["width"]) == out["blk"] for d in Ds), "幅を揃える"
+    blk = [int(d["blk"]) if "blk" in d else int(d["width"]) for d in Ds]           # 第 2 層のブロック幅（--split の NN は width/2）
+    out = {"width": sum(int(d["width"]) for d in Ds), "blk": blk[0]}
+    assert len(set(blk)) == 1 and all(int(d["width"]) % blk[0] == 0 for d in Ds), "ブロック幅を揃える"
     for i in range(6):
         xs, ys = Ds[0][f"xs_{i}"], Ds[0][f"ys_{i}"]
         W0 = np.concatenate([d[f"W0_{i}"] * (xs / d[f"xs_{i}"])[None, :] for d in Ds], 0)
