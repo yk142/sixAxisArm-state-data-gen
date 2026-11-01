@@ -74,29 +74,36 @@ def main():
         o = {"stiffA": 0.3 if part in ("all", "spring") else 0.0, "stribeck": 0.3 if part in ("all", "stribeck") else 0.0, "jac": 0 if "nojac" in sp[3:] else 1}
         plants[f"オラクル（{part}{'、J なし' if o['jac'] == 0 else ''}）sub{sub}" + ("（M 凍結）" if fz else "")] = TwoMassNB("data/export/c8_params.json", "data/export/elastic20.json", substeps=sub, frozen=fz, oracle=o)
     res, tim = [], []
+    pay = {}
     def load(paths):
         out = {}
         for pth in paths:
             with h5py.File(pth, "r") as f:
                 c = load_controller(f)
                 out.update({k: Scenario(f[k], c) for k in f if k != "controller"})
+                pay.update({k: float(np.ravel(f[k].attrs.get("payload", 0.0))[0]) for k in f if k != "controller"})   # 手先ペイロード（X-bench、issue #107）
         return out, c
     D, ctl = load(a.data)
     names = sorted(D); sc = [D[k] for k in names]
+    pls = sorted({pay[k] for k in names})
     q_by = {}
     if a.ref:
         Rf, _ = load(a.ref)
         q_by["真値（--ref）"] = [Rf[k].q for k in names]
     for pn, pl in plants.items():
-        pl.payload = 0.0; t0 = time.time()
-        q = closed_loop_el(pl, sc, ctl, iters=a.iters)[0]
-        q_by[pn] = [q[i][:s.K + 1] for i, s in enumerate(sc)]
+        t0 = time.time(); qs = [None] * len(sc)
+        for m in pls:                                                          # ペイロードごとに閉ループ
+            idx = [i for i, k in enumerate(names) if pay[k] == m]
+            pl.payload = m
+            q = closed_loop_el(pl, [sc[i] for i in idx], ctl, iters=a.iters)[0]
+            for j, i in enumerate(idx): qs[i] = q[j][:sc[i].K + 1]
+        q_by[pn] = qs
         tim.append({"plant": pn, "sec": time.time() - t0, "sim_s": float(sum(s.K for s in sc) * DT)})
         print(f"{pn}: {time.time() - t0:.0f} s", flush=True)
     for i, (nm, s) in enumerate(zip(names, sc)):
         pt = kin.tip_pos(s.q)
         for (b, e) in dwells(s.dq_ref):
-            row = {"scenario": nm, "start": b, "end": e, "move_deg": float(np.abs(s.q_ref[b] - s.q_ref[max(0, b - 1)]).max())}
+            row = {"scenario": nm, "payload": pay[nm], "start": b, "end": e, "move_deg": float(np.abs(s.q_ref[b] - s.q_ref[max(0, b - 1)]).max())}
             for pn, qs in q_by.items():
                 pm = kin.tip_pos(qs[i])
                 d = np.linalg.norm(pm - pt, axis=1) * 1e3                      # mm

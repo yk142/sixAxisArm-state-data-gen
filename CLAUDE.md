@@ -26,6 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 親資産 `~/matlab-projects/robotArmSurrogate-matlab` は path 参照のみ（コピー・変更しない）
 
 ## 現状
-- Phase 0〜4 完了（#1〜#85）。真値は弾性つき Simscape（#71）、比較基準は 2 慣性解析（`python/sa_nsm/twomass.py`）。
-- 次は Phase 5（docs/plan.md）: 逐次で実時間より速く、水準 G を満たす NN。NN の役割は計算の高速化（#87 で決定）。
+- Phase 0〜4 完了（#1〜#85）。真値は弾性つき Simscape（#71）、比較基準は 2 慣性解析（`python/sa_nsm/twomass.py`、numba 版 `twomass_nb.py`）。
+- Phase 5（docs/plan.md）: 目標は「手先の繰り返し精度 ±0.02 mm（水準 P02、PTP の位置決め後の先端誤差）を、逐次で実時間より速く計算できる手法」。真値にモデル外の効果（硬化ばね・Stribeck、#97）を入れ、① 公称 / ② 同定 / ④ ハイブリッド（同定＋残差トルク NN）を比べている。
+  - #105: ④（残差 NN 3 つのアンサンブル、sub2・M 凍結）が P-bench v1 で P02 を満たす（1 ms あたり 0.45 ms）。#107: 速度・ゲイン・姿勢の外挿は満たすが、ペイロードでは外れる（ばねの外挿）。
 - MATLAB: `src/`・`config/`・`tools/`・`test/`。Python: `python/`（venv `~/.venvs/sa-train`）。データは `data/`（git 管理外）。
