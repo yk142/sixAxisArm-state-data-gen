@@ -132,22 +132,26 @@ def _mass_bias(q, dq, R0, pj, mass, com, Ic, g0):
 
 @njit(cache=True)
 def _resid(th, dth, dq, R):
-    """残差トルク NN（issue #101）: 軸ごとの MLP [θ, dθ, dq] → (Δs ばねの非線形分, Δf 摩擦の非線形分)。R = (use, W0, b0, W1, b1, W2, b2, xs, ys)。"""
+    """残差トルク NN（issue #101）: 軸ごとの MLP [θ, dθ, dq(, tanh(dq/ε))] → (Δs ばねの非線形分, Δf 摩擦の非線形分)。R = (use, W0, b0, W1, b1, W2, b2, xs, ys, eps, [blk])。"""
     n = 6
     ds = np.zeros(n); df = np.zeros(n)
     if R[0] == 0:
         return ds, df
-    W0, b0, W1, b1, W2, b2, xs, ys = R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8]
-    H = b0.shape[1]
+    W0, b0, W1, b1, W2, b2, xs, ys, ep = R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9]
+    H = b0.shape[1]; nin = W0.shape[2]; blk = int(R[10][0])          # blk: 第 2 層のブロック幅（アンサンブル、issue #105）。ブロックの外は 0 なので飛ばす
     for i in range(n):
         x0 = th[i] / xs[i, 0]; x1 = dth[i] / xs[i, 1]; x2 = dq[i] / xs[i, 2]
         h1 = np.empty(H)
         for a in range(H):
-            h1[a] = np.tanh(W0[i, a, 0] * x0 + W0[i, a, 1] * x1 + W0[i, a, 2] * x2 + b0[i, a])
+            acc = W0[i, a, 0] * x0 + W0[i, a, 1] * x1 + W0[i, a, 2] * x2 + b0[i, a]
+            if nin == 4:                                                # issue #105: 4 番目の入力 tanh(dq/ε)
+                acc += W0[i, a, 3] * np.tanh(dq[i] / ep[i]) / xs[i, 3]
+            h1[a] = np.tanh(acc)
         h2 = np.empty(H)
         for a in range(H):
             acc = b1[i, a]
-            for b in range(H):
+            b_lo = (a // blk) * blk
+            for b in range(b_lo, b_lo + blk):
                 acc += W1[i, a, b] * h1[b]
             h2[a] = np.tanh(acc)
         o0 = b2[i, 0]; o1 = b2[i, 1]
@@ -246,10 +250,12 @@ def _step1(y, tau, h, nsub, frozen, R0, pj, mass, com, Ic, g0, k, c, Jm, Bv, Fc,
 def _load_residual(path):
     z1 = np.zeros((6, 1, 3)); z = np.zeros((6, 1))
     if path is None:
-        return (0, z1, z, np.zeros((6, 1, 1)), z, np.zeros((6, 2, 1)), np.zeros((6, 2)), np.ones((6, 3)), np.ones((6, 2)))
+        return (0, z1, z, np.zeros((6, 1, 1)), z, np.zeros((6, 2, 1)), np.zeros((6, 2)), np.ones((6, 3)), np.ones((6, 2)), np.ones(6), np.ones(1))
     d = np.load(path)
     st = lambda key: np.stack([d[f"{key}_{i}"] for i in range(6)]).astype(float)
-    return (1, st("W0"), st("b0"), st("W1"), st("b1"), st("W2"), st("b2"), st("xs"), st("ys"))
+    ep = st("eps").reshape(6) if "eps_0" in d else np.ones(6)               # issue #105 より前の npz には無い
+    W1 = st("W1"); blk = float(d["blk"]) if "blk" in d else float(W1.shape[1])
+    return (1, st("W0"), st("b0"), W1, st("b1"), st("W2"), st("b2"), st("xs"), st("ys"), ep, np.array([blk]))
 
 
 class TwoMassNB:
