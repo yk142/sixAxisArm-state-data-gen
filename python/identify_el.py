@@ -69,11 +69,13 @@ def tcal(D, path):
     return D
 
 
-def load(paths, stride, frac=1.0, seed=0, meas=None):
+def load(paths, stride, frac=1.0, seed=0, meas=None, qhat=""):
     """frac < 1: シナリオ単位で無作為に frac の割合だけ使う（データ量の軸、issue #101）。
-    meas: parse_meas の dict。与えると測定の模擬（issue #113）を通す（stride は無視し、測定の全サンプルを使う）。"""
+    meas: parse_meas の dict。与えると測定の模擬（issue #113）を通す（stride は無視し、測定の全サンプルを使う）。
+    qhat: recon_link.py recon の npz（issue #115）。測ったリンク側の角度の代わりに、再構成した q̂, dq̂（ddq̂ はその差分）を使う。meas が要る。"""
     rated = np.ravel(json.load(open("data/export/c8_params.json"))["tauRated"])[:6]
     rng = np.random.RandomState(int(meas["seed"]) if meas else 0)
+    QH = np.load(qhat) if qhat else None
     X = {k: [] for k in ("q", "dq", "qm", "dqm", "tau", "ddq", "ddqm", "pl")}
     keys = []
     for p in paths:
@@ -89,6 +91,9 @@ def load(paths, stride, frac=1.0, seed=0, meas=None):
                 g = f[k]; a = lambda n: g[n][:].T
                 if meas:
                     q, dq, qm, dqm, tau, ddq, ddqm, sl = measure(a("truth_q"), a("truth_qm"), a("truth_tau"), meas, rated, rng)
+                    if QH is not None:
+                        nm = f"{os.path.basename(p)}:{k}"; q, dq = QH[nm + ":q"], QH[nm + ":dq"]
+                        ddq = np.gradient(dq, 1.0 / meas["rate"], axis=0)
                 else:
                     q, dq, qm, dqm, tau = a("truth_q"), a("truth_dq"), a("truth_qm"), a("truth_dqm"), a("truth_tau")
                     ddq, ddqm = np.gradient(dq, DT8, axis=0), np.gradient(dqm, DT8, axis=0)
@@ -125,10 +130,11 @@ def main():
     ap.add_argument("--frac", type=float, default=1.0, help="使うシナリオの割合（データ量の軸、issue #101）"); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--tcal", default="", help="トルクのゲイン校正 JSON（calib_gain.py、issue #113）")
     ap.add_argument("--meas", default="", help="測定の模擬（issue #113）。例 rate=1000,quant=4.8e-7,tnoise=0.005,tgain=0.01,smooth=2")
+    ap.add_argument("--qhat", default="", help="再構成したリンク側の状態（recon_link.py recon の npz、issue #115）。q の測定の代わりに使う")
     ap.add_argument("--bv-nonneg", action="store_true", help="粘性摩擦 Bv を 0 以上に制約（負になった軸を 0 に固定して解き直す）")
     ap.add_argument("--cubic", action="store_true", help="モータ側の式に θ³ を足す（硬化ばね、issue #109）。出力 scale.k3 [N·m/rad³]（絶対値）")
     a = ap.parse_args()
-    D = tcal(load(a.data, a.stride, frac=a.frac, seed=a.seed, meas=parse_meas(a.meas)), a.tcal); N = len(D["q"]); print(f"行数 {N}")
+    D = tcal(load(a.data, a.stride, frac=a.frac, seed=a.seed, meas=parse_meas(a.meas), qhat=a.qhat), a.tcal); N = len(D["q"]); print(f"行数 {N}")
     el = json.load(open("data/export/elastic20.json")); P = json.load(open("data/export/c8_params.json"))
     k0, c0, J0 = (np.ravel(el[x])[:6] for x in ("k", "c", "Jm"))
     Fc0, Bv0, eps = (np.ravel(P[x])[:6] for x in ("frictionFc", "frictionBv", "frictionEps"))
